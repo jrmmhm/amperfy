@@ -58,6 +58,8 @@ class SsPlaylistsParserTest: AbstractSsParserTest {
     XCTAssertEqual(playlist.duration, 1391)
     XCTAssertEqual(playlist.remoteDuration, 1391)
     XCTAssertFalse(playlist.isCached)
+    XCTAssertEqual(playlist.artwork?.id, "pl-15")
+    XCTAssertEqual(playlist.getArtworkCollection(theme: .blue).singleArtwork?.id, "pl-15")
 
     playlist = playlists[0]
     XCTAssertEqual(playlist.account?.serverHash, TestAccountInfo.test1ServerHash)
@@ -69,5 +71,24 @@ class SsPlaylistsParserTest: AbstractSsParserTest {
     XCTAssertEqual(playlist.duration, 1018)
     XCTAssertEqual(playlist.remoteDuration, 1018)
     XCTAssertFalse(playlist.isCached)
+    XCTAssertEqual(playlist.artwork?.id, "pl-16")
+    XCTAssertEqual(playlist.getArtworkCollection(theme: .blue).singleArtwork?.id, "pl-16")
+  }
+
+  func testServerArtworkTakesPrecedenceOverSongCollage() {
+    let playlist = library.createPlaylist(account: account)
+    let song = library.createSong(account: account)
+    let songArtwork = library.createArtwork(account: account)
+    songArtwork.remoteInfo = ArtworkRemoteInfo(id: "song-art", type: "")
+    song.artwork = songArtwork
+    playlist.append(playable: song)
+    XCTAssertFalse(playlist.artworkItems.isEmpty)
+
+    let serverArtwork = library.createArtwork(account: account)
+    serverArtwork.remoteInfo = ArtworkRemoteInfo(id: "pl-99", type: "")
+    playlist.artwork = serverArtwork
+
+    let collection = playlist.getArtworkCollection(theme: .blue)
+    XCTAssertEqual(collection.singleArtwork?.id, "pl-99")
   }
 }
