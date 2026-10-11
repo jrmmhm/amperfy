@@ -44,6 +44,8 @@ extension ArtworkMO {
   public var download: DownloadMO?
   @NSManaged
   public var owners: NSSet?
+  @NSManaged
+  public var playlistOwners: NSSet?
 }
 
 // MARK: Generated accessors for owners
@@ -64,4 +66,24 @@ extension ArtworkMO {
   @objc(removeOwners:)
   @NSManaged
   public func removeFromOwners(_ values: NSSet)
+}
+
+// MARK: Generated accessors for playlistOwners
+
+extension ArtworkMO {
+  @objc(addPlaylistOwnersObject:)
+  @NSManaged
+  public func addToPlaylistOwners(_ value: PlaylistMO)
+
+  @objc(removePlaylistOwnersObject:)
+  @NSManaged
+  public func removeFromPlaylistOwners(_ value: PlaylistMO)
+
+  @objc(addPlaylistOwners:)
+  @NSManaged
+  public func addToPlaylistOwners(_ values: NSSet)
+
+  @objc(removePlaylistOwners:)
+  @NSManaged
+  public func removeFromPlaylistOwners(_ values: NSSet)
 }
