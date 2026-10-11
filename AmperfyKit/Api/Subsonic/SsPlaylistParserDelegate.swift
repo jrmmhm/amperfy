@@ -89,6 +89,17 @@ class SsPlaylistParserDelegate: SsXmlParser {
          let songCount = Int(attributeSongCount) {
         playlist?.remoteSongCount = songCount
       }
+      if let attributeCoverArt = attributeDict["coverArt"], !attributeCoverArt.isEmpty {
+        let remoteInfo = ArtworkRemoteInfo(id: attributeCoverArt, type: "")
+        if let existingArtwork = library.getArtwork(for: account, remoteInfo: remoteInfo) {
+          playlist?.artwork = existingArtwork
+        } else {
+          let createdArtwork = library.createArtwork(account: account)
+          createdArtwork.remoteInfo = remoteInfo
+          createdArtwork.status = .NotChecked
+          playlist?.artwork = createdArtwork
+        }
+      }
     }
   }
 

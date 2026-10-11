@@ -26,14 +26,17 @@ public class ArtworkCollection {
   public let defaultArtworkType: ArtworkType
   public let singleImageEntity: AbstractLibraryEntity?
   public let quadImageEntity: [AbstractLibraryEntity]?
+  public let singleArtwork: Artwork?
 
   init(
     defaultArtworkType: ArtworkType,
     singleImageEntity: AbstractLibraryEntity?,
-    quadImageEntity: [AbstractLibraryEntity]? = nil
+    quadImageEntity: [AbstractLibraryEntity]? = nil,
+    singleArtwork: Artwork? = nil
   ) {
     self.defaultArtworkType = defaultArtworkType
     self.singleImageEntity = singleImageEntity
     self.quadImageEntity = quadImageEntity
+    self.singleArtwork = singleArtwork
   }
 }

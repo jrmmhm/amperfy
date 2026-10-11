@@ -123,7 +123,9 @@ open class EntityImageView: UIView {
     quadImages.forEach { $0.isHidden = true }
     singleImage.isHidden = false
 
-    if let quadEntities = collection.quadImageEntity {
+    if let singleArtwork = collection.singleArtwork {
+      singleImage.displayAndUpdate(artwork: singleArtwork)
+    } else if let quadEntities = collection.quadImageEntity {
       if quadEntities.count > 1 {
         // check if all images are the same
         if Set(quadEntities.compactMap { $0.artwork?.id }).count == 1 {

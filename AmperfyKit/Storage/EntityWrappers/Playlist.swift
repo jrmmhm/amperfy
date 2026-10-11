@@ -144,6 +144,18 @@ public class Playlist: Identifyable {
     }
   }
 
+  public var artwork: Artwork? {
+    get {
+      guard let artworkMO = managedObject.artwork else { return nil }
+      return Artwork(managedObject: artworkMO)
+    }
+    set {
+      if managedObject.artwork != newValue?.managedObject {
+        managedObject.artwork = newValue?.managedObject
+      }
+    }
+  }
+
   public var name: String {
     get {
       managedObject.name ?? ""
@@ -532,6 +544,14 @@ extension Playlist: PlayableContainable {
   }
 
   public func getArtworkCollection(theme: ThemePreference) -> ArtworkCollection {
+    if let artwork = artwork {
+      return ArtworkCollection(
+        defaultArtworkType: getDefaultArtworkType(),
+        singleImageEntity: nil,
+        singleArtwork: artwork
+      )
+    }
+
     let artworkItems = artworkItems
 
     if artworkItems.isEmpty {
