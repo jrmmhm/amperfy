@@ -282,4 +282,47 @@ class SongTest: XCTestCase {
     XCTAssertFalse(isShownInSongLists(testSong))
     XCTAssertTrue(library.getCachedSongs(for: account).contains(testSong))
   }
+
+  func testCachedSongWithoutMetadata_IsHiddenUntilItsAlbumIsSynced() {
+    // "Resync Library" recreates a downloaded song like
+    // CommonLibrarySyncer.createCachedItemRepresentationsInCoreData does
+    let stub = library.createSong(account: account)
+    stub.id = "stubId"
+    stub.relFilePath = URL(string: "testSong")
+    stub.contentTypeTranscoded = "audio/mpeg"
+    library.saveContext()
+    XCTAssertEqual(stub.displayString, "Unknown Artist - Unknown Title")
+    XCTAssertFalse(isShownInSongLists(stub))
+    XCTAssertFalse(stub.isAvailableToUser())
+
+    let songsListRequest: NSFetchRequest<SongMO> = SongMO.fetchRequest()
+    songsListRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+      library.getFetchPredicate(forAccount: account),
+      SongMO.excludeServerDeleteUncachedSongsFetchPredicate,
+    ])
+    let listedSongs = (try? cdHelper.persistentContainer.viewContext.fetch(songsListRequest)) ?? []
+    XCTAssertFalse(listedSongs.isEmpty)
+    XCTAssertTrue(listedSongs.allSatisfy { $0.title != nil })
+
+    // the album sync fills in the metadata of the song
+    guard let album = getSeededAvailableAlbum() else { XCTFail(); return }
+    stub.title = "Synced"
+    stub.album = album
+    stub.size = 1000
+    library.saveContext()
+    XCTAssertTrue(isShownInSongLists(stub))
+    XCTAssertTrue(stub.isAvailableToUser())
+  }
+
+  func testCachedSongWithMetadataWithoutAlbum_IsShown() {
+    let stub = library.createSong(account: account)
+    stub.id = "stubId"
+    stub.relFilePath = URL(string: "testSong")
+    stub.title = "Synced"
+    library.saveContext()
+    XCTAssertNil(stub.album)
+    XCTAssertEqual(stub.size, 0)
+    XCTAssertTrue(isShownInSongLists(stub))
+    XCTAssertTrue(stub.isAvailableToUser())
+  }
 }
