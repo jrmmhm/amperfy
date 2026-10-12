@@ -81,6 +81,7 @@ class PlayerControlView: UIView {
 
   private lazy var shuffleButton: UIButton = {
     let button = UIButton(configuration: .player(isSelected: false))
+    button.preferredBehavioralStyle = .pad
     button.accessibilityLabel = "Shuffle"
     button.addTarget(self, action: #selector(Self.shuffleButtonPushed), for: .touchUpInside)
     return button
@@ -88,6 +89,7 @@ class PlayerControlView: UIView {
 
   private lazy var repeatButton: UIButton = {
     let button = UIButton(configuration: .player(isSelected: false))
+    button.preferredBehavioralStyle = .pad
     button.accessibilityLabel = "Repeat"
     button.addTarget(self, action: #selector(Self.repeatButtonPushed), for: .touchUpInside)
     return button
