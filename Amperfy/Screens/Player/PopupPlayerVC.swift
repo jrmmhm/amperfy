@@ -61,6 +61,8 @@ class PopupPlayerVC: UIViewController, UIScrollViewDelegate {
   var userQueueSectionHeader: UserQueueSectionHeader?
   var contextNextQueueSectionHeader: ContextQueueNextSectionHeader?
   var activeDisplayedSectionHeader = Set<PlayerSectionCategory>()
+  // identity of the playable whose info is displayed, to detect a song change
+  var displayedPlayableID: String?
   lazy var clearEmptySectionFooter = {
     let view = UIView()
     view.backgroundColor = .clear

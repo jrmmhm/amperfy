@@ -24,6 +24,8 @@ import DominantColors
 import UIKit
 
 extension PopupPlayerVC {
+  static let playableChangeAnimationDuration = TimeInterval(0.25)
+
   func refresh() {
     refreshContextQueueSectionHeader()
     refreshUserQueueSectionHeader()
@@ -33,6 +35,7 @@ extension PopupPlayerVC {
   }
 
   func refreshCurrentlyPlayingInfoView() {
+    crossDissolveIfPlayableChanged()
     refreshBackgroundItemArtwork()
     largeCurrentlyPlayingView?.refresh()
     for visibleCell in tableView.visibleCells {
@@ -40,6 +43,32 @@ extension PopupPlayerVC {
         currentlyPlayingCell.refresh()
         break
       }
+    }
+  }
+
+  /// Fades the following content update when another playable started.
+  /// No fade on first display, to or from an empty player, or with Reduce Motion enabled.
+  private func crossDissolveIfPlayableChanged() {
+    let previousPlayableID = displayedPlayableID
+    let playableID = player.currentlyPlaying?.uniqueID
+    displayedPlayableID = playableID
+    guard let previousPlayableID, let playableID, previousPlayableID != playableID,
+          !UIAccessibility.isReduceMotionEnabled
+    else { return }
+
+    var views: [UIView] = [backgroundImage]
+    if let largeCurrentlyPlayingView {
+      views.append(largeCurrentlyPlayingView.artworkImage)
+      views.append(largeCurrentlyPlayingView.detailsContainer)
+    }
+    if let currentlyPlayingTableCell {
+      views.append(currentlyPlayingTableCell.contentView)
+    }
+    let transition = CATransition()
+    transition.type = .fade
+    transition.duration = Self.playableChangeAnimationDuration
+    for view in views {
+      view.layer.add(transition, forKey: kCATransition)
     }
   }
 
