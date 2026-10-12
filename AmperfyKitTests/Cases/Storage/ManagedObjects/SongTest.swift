@@ -20,6 +20,7 @@
 //
 
 @testable import AmperfyKit
+import CoreData
 import XCTest
 
 @MainActor
@@ -210,5 +211,75 @@ class SongTest: XCTestCase {
     XCTAssertFalse(musicFolder.isCached)
     XCTAssertFalse(playlist1.isCached)
     XCTAssertFalse(playlist2.isCached)
+  }
+
+  private func isShownInSongLists(_ song: Song) -> Bool {
+    let fetchRequest: NSFetchRequest<SongMO> = SongMO.fetchRequest()
+    fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+      SongMO.excludeServerDeleteUncachedSongsFetchPredicate,
+      NSPredicate(format: "%K == %@", #keyPath(SongMO.id), song.id),
+    ])
+    let songsMO = (try? cdHelper.persistentContainer.viewContext.fetch(fetchRequest)) ?? []
+    return songsMO.contains(song.managedObject)
+  }
+
+  private func getSeededAvailableAlbum() -> Album? {
+    library.getAlbum(
+      for: account,
+      id: cdHelper.seeder.albums[0].id,
+      isDetailFaultResolution: true
+    )
+  }
+
+  func testServerDeletedCachedSong_IsHidden() {
+    testSong.title = "Deleted"
+    testSong.relFilePath = URL(string: "testSong")
+    testSong.remoteStatus = .deleted
+    library.saveContext()
+    XCTAssertFalse(isShownInSongLists(testSong))
+    XCTAssertFalse(testSong.isAvailableToUser())
+    XCTAssertTrue([testSong].filterServerDeleteUncachedSongs().isEmpty)
+  }
+
+  func testServerDeletedSongInAvailableAlbum_IsHidden() {
+    guard let album = getSeededAvailableAlbum() else { XCTFail(); return }
+    XCTAssertEqual(album.remoteStatus, .available)
+    testSong.title = "Deleted"
+    testSong.size = 1000
+    testSong.album = album
+    testSong.remoteStatus = .deleted
+    library.saveContext()
+    XCTAssertFalse(isShownInSongLists(testSong))
+    XCTAssertTrue([testSong].filterServerDeleteUncachedSongs().isEmpty)
+  }
+
+  func testCachedAvailableSongWithoutAlbum_IsShown() {
+    testSong.title = "Offline"
+    testSong.relFilePath = URL(string: "testSong")
+    library.saveContext()
+    XCTAssertNil(testSong.album)
+    XCTAssertEqual(testSong.remoteStatus, .available)
+    XCTAssertTrue(isShownInSongLists(testSong))
+    XCTAssertEqual([testSong].filterServerDeleteUncachedSongs(), [testSong])
+  }
+
+  func testUncachedAvailableSongInAvailableAlbum_IsShown() {
+    guard let album = getSeededAvailableAlbum() else { XCTFail(); return }
+    testSong.title = "Streamed"
+    testSong.size = 1000
+    testSong.album = album
+    library.saveContext()
+    XCTAssertFalse(testSong.isCached)
+    XCTAssertTrue(isShownInSongLists(testSong))
+    XCTAssertEqual([testSong].filterServerDeleteUncachedSongs(), [testSong])
+  }
+
+  func testServerDeletedCachedSong_IsStillReturnedByGetCachedSongs() {
+    testSong.title = "Deleted"
+    testSong.relFilePath = URL(string: "testSong")
+    testSong.remoteStatus = .deleted
+    library.saveContext()
+    XCTAssertFalse(isShownInSongLists(testSong))
+    XCTAssertTrue(library.getCachedSongs(for: account).contains(testSong))
   }
 }
