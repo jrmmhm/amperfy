@@ -124,6 +124,15 @@ class PlayerControlView: UIView {
     playerModeButton.tintColor = .label
     volumeButton.tintColor = .label
     optionsButton.imageView?.tintColor = .label
+    // distinct from the ellipsis of the currently playing item's context menu
+    optionsButton.setImage(
+      UIImage(
+        systemName: "slider.horizontal.3",
+        withConfiguration: UIImage.SymbolConfiguration(scale: .medium)
+      ),
+      for: .normal
+    )
+    optionsButton.accessibilityLabel = "Player Options"
 
     // shuffle and repeat are placed in front of the volume button
     let insertIndex = optionsStackView.arrangedSubviews.firstIndex(of: volumeButton) ??
