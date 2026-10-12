@@ -401,7 +401,8 @@ public class PlayQueueHandler {
     }
   }
 
-  // songs the server reported deleted stay in the queue but are never played
+  // songs the server reported deleted stay in the queue but are passed over
+  // whenever the player selects the next or previous item
   func isServerDeletedSong(_ playable: AbstractPlayable) -> Bool {
     playable.isSong && playable.remoteStatus == .deleted
   }
