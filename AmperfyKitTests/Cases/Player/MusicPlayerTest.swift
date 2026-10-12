@@ -2824,4 +2824,121 @@ class MusicPlayerTest: XCTestCase {
     XCTAssertTrue(testPlayer.isPlaying)
     XCTAssertEqual(testPlayer.currentlyPlaying?.id, playlistAllCached.playables[0].id)
   }
+
+  func getCachedSeedSongs(_ seedIndices: [Int]) -> [Song] {
+    let songs = seedIndices.compactMap {
+      library.getSong(for: account, id: cdHelper.seeder.songs[$0].id)
+    }
+    XCTAssertEqual(songs.count, seedIndices.count)
+    XCTAssertTrue(songs.allSatisfy { $0.isCached })
+    return songs
+  }
+
+  func testPlayContext_LeavesServerDeletedSongOut() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    songs[1].remoteStatus = .deleted
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().map { $0.id }, [songs[2].id])
+  }
+
+  func testPlayContext_ServerDeletedSongFirst() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    songs[0].remoteStatus = .deleted
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[1].id)
+    XCTAssertEqual(testPlayer.getAllPrevQueueItems().count, 0)
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().map { $0.id }, [songs[2].id])
+  }
+
+  func testPlayContext_SelectedServerDeletedSong_PlaysNextPlayable() {
+    let songs = getCachedSeedSongs([4, 5, 6, 7])
+    songs[1].remoteStatus = .deleted
+    testPlayer.play(context: PlayContext(name: "Deleted", index: 1, playables: songs))
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[2].id)
+    XCTAssertEqual(testPlayer.getAllPrevQueueItems().map { $0.id }, [songs[0].id])
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().map { $0.id }, [songs[3].id])
+  }
+
+  func testPlayNext_SkipsServerDeletedSongAlreadyQueued() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().count, 2)
+    songs[1].remoteStatus = .deleted
+    testPlayer.playNext()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[2].id)
+  }
+
+  func testDidItemFinishedPlaying_SkipsServerDeletedSongAlreadyQueued() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[1].remoteStatus = .deleted
+    backendPlayer.responder?.didItemFinishedPlaying()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[2].id)
+  }
+
+  func testDidItemFinishedPlaying_RepeatAllWrapSkipsServerDeletedSong() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", index: 2, playables: songs))
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[2].id)
+    songs[0].remoteStatus = .deleted
+    testPlayer.setRepeatMode(.all)
+    backendPlayer.responder?.didItemFinishedPlaying()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[1].id)
+  }
+
+  func testDidItemFinishedPlaying_RepeatAllReplaysOnlyPlayableSong() {
+    let songs = getCachedSeedSongs([4, 5])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[1].remoteStatus = .deleted
+    testPlayer.setRepeatMode(.all)
+    backendPlayer.responder?.didItemFinishedPlaying()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
+  }
+
+  func testPlayNext_OnlyServerDeletedSongsLeft_Stops() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[1].remoteStatus = .deleted
+    songs[2].remoteStatus = .deleted
+    testPlayer.setRepeatMode(.all)
+    testPlayer.playNext()
+    XCTAssertFalse(testPlayer.isPlaying)
+  }
+
+  func testPlayPrevious_SkipsServerDeletedSong() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", index: 2, playables: songs))
+    songs[1].remoteStatus = .deleted
+    testMusicPlayer.playPrevious()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
+  }
+
+  func testPlayNext_ShuffleSkipsServerDeletedSong() {
+    let songs = getCachedSeedSongs([4, 5, 6, 7])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    testPlayer.toggleShuffle()
+    let nextSongs = testPlayer.getAllNextQueueItems()
+    XCTAssertEqual(nextSongs.count, 3)
+    nextSongs[0].remoteStatus = .deleted
+    testPlayer.playNext()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, nextSongs[1].id)
+    testPlayer.toggleShuffle()
+  }
+
+  func testNextPlayablePreload_SkipsServerDeletedSong() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[1].remoteStatus = .deleted
+    XCTAssertEqual(backendPlayer.nextPlayablePreloadCB?()?.id, songs[2].id)
+  }
 }

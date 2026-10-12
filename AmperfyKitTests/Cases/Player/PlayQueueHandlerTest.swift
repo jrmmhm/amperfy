@@ -3127,4 +3127,112 @@ class PlayQueueHandlerTest: XCTestCase {
     checkQueueInfoConsistency()
     testPlayer.setPlayerMode(.podcast)
   }
+
+  func markServerDeleted(seedIds: [Int]) {
+    for seedId in seedIds {
+      guard let song = library.getSong(for: account, id: cdHelper.seeder.songs[seedId].id)
+      else { XCTFail(); return }
+      song.remoteStatus = .deleted
+    }
+  }
+
+  func testNextPlayableIndex_NoDeletedSongs() {
+    prepareNoWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    XCTAssertEqual(
+      testQueueHandler.getNextPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .user, index: 0)
+    )
+    XCTAssertEqual(
+      testQueueHandler.getPreviousPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .prev, index: 1)
+    )
+  }
+
+  func testNextPlayableIndex_SkipsServerDeletedSongs() {
+    prepareNoWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    markServerDeleted(seedIds: [5])
+    XCTAssertEqual(
+      testQueueHandler.getNextPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .user, index: 1)
+    )
+    markServerDeleted(seedIds: [6, 7, 8])
+    XCTAssertEqual(
+      testQueueHandler.getNextPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .next, index: 0)
+    )
+    markServerDeleted(seedIds: [3])
+    XCTAssertEqual(
+      testQueueHandler.getNextPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .next, index: 1)
+    )
+  }
+
+  func testNextPlayableIndex_RepeatAllWrapSkipsServerDeletedSongs() {
+    testPlayer.removeAllItems()
+    fillPlayerWithSomeSongs()
+    testPlayer.setCurrentIndex(4)
+    markServerDeleted(seedIds: [0])
+    XCTAssertNil(testQueueHandler.getNextPlayableIndex(isRepeatAll: false))
+    XCTAssertEqual(
+      testQueueHandler.getNextPlayableIndex(isRepeatAll: true),
+      PlayerIndex(queueType: .prev, index: 1)
+    )
+  }
+
+  func testPreviousPlayableIndex_SkipsServerDeletedSongs() {
+    testPlayer.removeAllItems()
+    fillPlayerWithSomeSongs()
+    testPlayer.setCurrentIndex(2)
+    markServerDeleted(seedIds: [1])
+    XCTAssertEqual(
+      testQueueHandler.getPreviousPlayableIndex(isRepeatAll: false),
+      PlayerIndex(queueType: .prev, index: 0)
+    )
+    markServerDeleted(seedIds: [0])
+    XCTAssertNil(testQueueHandler.getPreviousPlayableIndex(isRepeatAll: false))
+    XCTAssertEqual(
+      testQueueHandler.getPreviousPlayableIndex(isRepeatAll: true),
+      PlayerIndex(queueType: .next, index: 1)
+    )
+    markServerDeleted(seedIds: [4])
+    XCTAssertEqual(
+      testQueueHandler.getPreviousPlayableIndex(isRepeatAll: true),
+      PlayerIndex(queueType: .next, index: 0)
+    )
+  }
+
+  func testNextPlayableIndex_OnlyServerDeletedSongs() {
+    prepareNoWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    markServerDeleted(seedIds: [0, 1, 3, 4, 5, 6, 7, 8])
+    XCTAssertNil(testQueueHandler.getNextPlayableIndex(isRepeatAll: true))
+    XCTAssertNil(testQueueHandler.getPreviousPlayableIndex(isRepeatAll: true))
+  }
+
+  func testNextPlayableIndex_ShuffleSkipsServerDeletedSongs() {
+    testPlayer.removeAllItems()
+    fillPlayerWithSomeSongs()
+    testPlayer.setShuffle(true)
+    guard let nextSong = testQueueHandler.getNextQueueItem(at: 0),
+          let secondNextSong = testQueueHandler.getNextQueueItem(at: 1)
+    else { XCTFail(); return }
+    nextSong.remoteStatus = .deleted
+    let nextPlayableIndex = testQueueHandler.getNextPlayableIndex(isRepeatAll: false)
+    XCTAssertEqual(nextPlayableIndex, PlayerIndex(queueType: .next, index: 1))
+    XCTAssertEqual(testQueueHandler.getPlayable(at: nextPlayableIndex!), secondNextSong)
+    testPlayer.setShuffle(false)
+  }
+
+  func testIsServerDeletedSong_OnlySongs() {
+    guard let song = library.getSong(for: account, id: cdHelper.seeder.songs[0].id),
+          let radio = library.getRadios(for: account).first
+    else { XCTFail(); return }
+    XCTAssertFalse(testQueueHandler.isServerDeletedSong(song))
+    song.remoteStatus = .deleted
+    XCTAssertTrue(testQueueHandler.isServerDeletedSong(song))
+    radio.remoteStatus = .deleted
+    XCTAssertFalse(testQueueHandler.isServerDeletedSong(radio))
+  }
 }
