@@ -102,6 +102,19 @@ class SongsVC: SingleFetchedResultsTableViewController<SongMO> {
     resultUpdateHandler?.changesDidEnd = {
       self.updateContentUnavailable()
     }
+    appDelegate.notificationHandler.register(
+      self,
+      selector: #selector(handleLibrarySongsSynced),
+      name: .librarySongsSynced,
+      object: nil
+    )
+  }
+
+  @objc
+  private func handleLibrarySongsSynced() {
+    // a hidden list refetches in viewIsAppearing
+    guard viewIfLoaded?.window != nil else { return }
+    updateSearchResults(for: searchController)
   }
 
   func updateContentUnavailable() {
