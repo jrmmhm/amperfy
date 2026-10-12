@@ -93,6 +93,10 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
        currentlyPlaying.isRadio {
       return false
     }
+    if let currentlyPlaying = currentlyPlaying,
+       queueHandler.isServerDeletedSong(currentlyPlaying) {
+      return false
+    }
     if !backendAudioPlayer.canBeContinued {
       return false
     }
@@ -108,6 +112,11 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
   }
 
   private func insertIntoPlayer(playable: AbstractPlayable) {
+    // the server may report a song deleted after it has been queued
+    guard !queueHandler.isServerDeletedSong(playable) else {
+      playNext()
+      return
+    }
     userStatistics.playedItem(
       repeatMode: playerStatus.repeatMode,
       isShuffle: playerStatus.isShuffle
@@ -135,10 +144,8 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
     } else if playerStatus
       .repeatMode == .single ||
       (
-        // repeat mode all and only one song is in player -> repeat
-        playerStatus.repeatMode == .all && queueHandler.prevQueueCount == 0 && queueHandler
-          .userQueueCount == 0 && queueHandler
-          .nextQueueCount == 0
+        // repeat mode all and only one playable song is in player -> repeat
+        playerStatus.repeatMode == .all && nextPlayerIndex == nil
       ) {
       replayCurrentItem()
     } else if !settings.user.isPlaybackStartOnlyOnPlay {
@@ -157,7 +164,23 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
     }
   }
 
-  public func play(context: PlayContext) {
+  private func removeServerDeletedSongs(from context: PlayContext) -> PlayContext {
+    guard context.playables.contains(where: { queueHandler.isServerDeletedSong($0) })
+    else { return context }
+    let playables = context.playables.filter { !queueHandler.isServerDeletedSong($0) }
+    // start at the first remaining playable at or after the selected one
+    let index = context.playables.prefix(context.index)
+      .filter { !queueHandler.isServerDeletedSong($0) }.count
+    return PlayContext(
+      name: context.name,
+      type: context.type,
+      index: index < playables.count ? index : 0,
+      playables: playables
+    )
+  }
+
+  public func play(context selectedContext: PlayContext) {
+    let context = removeServerDeletedSongs(from: selectedContext)
     guard let activePlayable = context.getActivePlayable() else { return }
     let topUserQueueItem = queueHandler.getUserQueueItem(at: 0)
     let wasUserQueuePlaying = queueHandler.isUserQueuePlaying
@@ -197,10 +220,9 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
 
   // BackendAudioPlayerNotifiable
   func playPrevious() {
-    if queueHandler.prevQueueCount > 0 {
-      play(playerIndex: PlayerIndex(queueType: .prev, index: queueHandler.prevQueueCount - 1))
-    } else if playerStatus.repeatMode == .all, queueHandler.nextQueueCount > 0 {
-      play(playerIndex: PlayerIndex(queueType: .next, index: queueHandler.nextQueueCount - 1))
+    if let previousPlayerIndex = queueHandler
+      .getPreviousPlayableIndex(isRepeatAll: playerStatus.repeatMode == .all) {
+      play(playerIndex: previousPlayerIndex)
     } else {
       replayCurrentItem()
     }
@@ -231,15 +253,7 @@ public class AudioPlayer: NSObject, BackendAudioPlayerNotifiable {
   }
 
   private var nextPlayerIndex: PlayerIndex? {
-    if queueHandler.userQueueCount > 0 {
-      return PlayerIndex(queueType: .user, index: 0)
-    } else if queueHandler.nextQueueCount > 0 {
-      return PlayerIndex(queueType: .next, index: 0)
-    } else if playerStatus.repeatMode == .all, queueHandler.prevQueueCount > 0 {
-      return PlayerIndex(queueType: .prev, index: 0)
-    } else {
-      return nil
-    }
+    queueHandler.getNextPlayableIndex(isRepeatAll: playerStatus.repeatMode == .all)
   }
 
   func pause() {

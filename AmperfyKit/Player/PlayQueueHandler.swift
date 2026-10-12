@@ -401,6 +401,46 @@ public class PlayQueueHandler {
     }
   }
 
+  // songs the server reported deleted stay in the queue but are never played
+  func isServerDeletedSong(_ playable: AbstractPlayable) -> Bool {
+    playable.isSong && playable.remoteStatus == .deleted
+  }
+
+  private func isPlayable(_ playable: AbstractPlayable?) -> Bool {
+    guard let playable else { return false }
+    return !isServerDeletedSong(playable)
+  }
+
+  func getNextPlayableIndex(isRepeatAll: Bool) -> PlayerIndex? {
+    if let index = stride(from: 0, to: userQueueCount, by: 1)
+      .first(where: { isPlayable(getUserQueueItem(at: $0)) }) {
+      return PlayerIndex(queueType: .user, index: index)
+    }
+    if let index = stride(from: 0, to: nextQueueCount, by: 1)
+      .first(where: { isPlayable(getNextQueueItem(at: $0)) }) {
+      return PlayerIndex(queueType: .next, index: index)
+    }
+    if isRepeatAll,
+       let index = stride(from: 0, to: prevQueueCount, by: 1)
+       .first(where: { isPlayable(getPrevQueueItem(at: $0)) }) {
+      return PlayerIndex(queueType: .prev, index: index)
+    }
+    return nil
+  }
+
+  func getPreviousPlayableIndex(isRepeatAll: Bool) -> PlayerIndex? {
+    if let index = stride(from: prevQueueCount - 1, through: 0, by: -1)
+      .first(where: { isPlayable(getPrevQueueItem(at: $0)) }) {
+      return PlayerIndex(queueType: .prev, index: index)
+    }
+    if isRepeatAll,
+       let index = stride(from: nextQueueCount - 1, through: 0, by: -1)
+       .first(where: { isPlayable(getNextQueueItem(at: $0)) }) {
+      return PlayerIndex(queueType: .next, index: index)
+    }
+    return nil
+  }
+
   // returns true if the player has been reseted
   func logout(account: Account) -> Bool {
     // if one playlist contain an element from the logout account -> reset complete player
