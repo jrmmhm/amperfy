@@ -2941,4 +2941,24 @@ class MusicPlayerTest: XCTestCase {
     songs[1].remoteStatus = .deleted
     XCTAssertEqual(backendPlayer.nextPlayablePreloadCB?()?.id, songs[2].id)
   }
+
+  func testPlayContext_NoPlayableSongAfterSelected_StartsAtFirstPlayable() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    songs[1].remoteStatus = .deleted
+    songs[2].remoteStatus = .deleted
+    testPlayer.play(context: PlayContext(name: "Deleted", index: 1, playables: songs))
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().count, 0)
+  }
+
+  func testDidItemFinishedPlaying_RepeatSingleCurrentSongServerDeleted_PlaysNext() {
+    let songs = getCachedSeedSongs([4, 5])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    testPlayer.setRepeatMode(.single)
+    songs[0].remoteStatus = .deleted
+    backendPlayer.responder?.didItemFinishedPlaying()
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[1].id)
+  }
 }
