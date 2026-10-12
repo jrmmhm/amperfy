@@ -65,6 +65,8 @@ final class Settings: ObservableObject {
   @Published
   var isShowMusicPlayerSkipButtons = false
   @Published
+  var isShowPlayerVolumeButton = true
+  @Published
   var isLyricsSmoothScrolling = true
   @Published
   var swipeActionSettings = SwipeActionSettings(leading: [], trailing: [])

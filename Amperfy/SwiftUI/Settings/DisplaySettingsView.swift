@@ -89,6 +89,17 @@ struct DisplaySettingsView: View {
           "Add skip forward and skip backward buttons to the music player, along with the previous/next buttons."
         )
 
+        SettingsSection(
+          content: {
+            SettingsCheckBoxRow(
+              title: "Volume Button in Player",
+              isOn: $settings.isShowPlayerVolumeButton
+            )
+          },
+          footer:
+          "Show the volume button below the playback controls in the player."
+        )
+
         if let activeAccountInfo = settings.activeAccountInfo,
            let credentials = appDelegate.storage.settings.accounts.getSetting(activeAccountInfo)
            .read.loginCredentials,

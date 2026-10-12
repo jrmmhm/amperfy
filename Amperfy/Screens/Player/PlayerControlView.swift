@@ -79,6 +79,20 @@ class PlayerControlView: UIView {
   @IBOutlet
   weak var optionsButton: UIButton!
 
+  private lazy var shuffleButton: UIButton = {
+    let button = UIButton(configuration: .player(isSelected: false))
+    button.accessibilityLabel = "Shuffle"
+    button.addTarget(self, action: #selector(Self.shuffleButtonPushed), for: .touchUpInside)
+    return button
+  }()
+
+  private lazy var repeatButton: UIButton = {
+    let button = UIButton(configuration: .player(isSelected: false))
+    button.accessibilityLabel = "Repeat"
+    button.addTarget(self, action: #selector(Self.repeatButtonPushed), for: .touchUpInside)
+    return button
+  }()
+
   required init?(coder aDecoder: NSCoder) {
     #if targetEnvironment(macCatalyst) // ok
       self.airplayVolume = MPVolumeView(frame: .zero)
@@ -110,6 +124,18 @@ class PlayerControlView: UIView {
     playerModeButton.tintColor = .label
     volumeButton.tintColor = .label
     optionsButton.imageView?.tintColor = .label
+
+    // shuffle and repeat are placed in front of the volume button
+    let insertIndex = optionsStackView.arrangedSubviews.firstIndex(of: volumeButton) ??
+      optionsStackView.arrangedSubviews.count
+    for (offset, button) in [shuffleButton, repeatButton].enumerated() {
+      optionsStackView.insertArrangedSubview(button, at: insertIndex + offset)
+      NSLayoutConstraint.activate([
+        button.widthAnchor.constraint(equalToConstant: 28),
+        button.heightAnchor.constraint(equalTo: button.widthAnchor),
+      ])
+    }
+
     refreshPlayer()
     playerHandler?.refreshPlayerOptions(
       optionsButton: optionsButton,
@@ -162,6 +188,18 @@ class PlayerControlView: UIView {
   @IBAction
   func skipForwardButtonPushed(_ sender: Any) {
     playerHandler?.skipForwardButtonPushed()
+  }
+
+  @IBAction
+  func shuffleButtonPushed(_ sender: Any) {
+    playerHandler?.shuffleButtonPushed()
+    refreshShuffleRepeatButtons()
+  }
+
+  @IBAction
+  func repeatButtonPushed(_ sender: Any) {
+    playerHandler?.repeatButtonPushed()
+    refreshShuffleRepeatButtons()
   }
 
   @IBAction
@@ -265,7 +303,14 @@ class PlayerControlView: UIView {
     )
     playerHandler?.refreshPrevNextButtons(previousButton: previousButton, nextButton: nextButton)
     playerHandler?.refreshDisplayPlaylistButton(displayPlaylistButton: displayPlaylistButton)
+    refreshShuffleRepeatButtons()
+    playerHandler?.refreshVolumeButton(volumeButton: volumeButton)
     refreshPlayerModeChangeButton()
+  }
+
+  func refreshShuffleRepeatButtons() {
+    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
+    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
   }
 
   func createPlaybackRateMenu() -> UIMenuElement {
@@ -486,9 +531,13 @@ extension PlayerControlView: MusicPlayable {
 
   func didArtworkChange() {}
 
-  func didShuffleChange() {}
+  func didShuffleChange() {
+    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
+  }
 
-  func didRepeatChange() {}
+  func didRepeatChange() {
+    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
+  }
 
   func didPlaybackRateChange() {}
 }

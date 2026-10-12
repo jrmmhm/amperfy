@@ -118,6 +118,13 @@ public struct UserSettings: Sendable, Codable {
     set { _isShowMusicPlayerSkipButtons = newValue }
   }
 
+  // optional: settings saved before this key existed must still decode
+  private var _isShowPlayerVolumeButton: Bool?
+  public var isShowPlayerVolumeButton: Bool {
+    get { _isShowPlayerVolumeButton ?? true }
+    set { _isShowPlayerVolumeButton = newValue }
+  }
+
   private var _isLyricsSmoothScrolling: Bool = true
   public var isLyricsSmoothScrolling: Bool {
     get { _isLyricsSmoothScrolling }

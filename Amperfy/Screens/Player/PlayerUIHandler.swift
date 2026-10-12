@@ -138,6 +138,10 @@ class PlayerUIHandler: NSObject {
     }
   }
 
+  func refreshVolumeButton(volumeButton: UIButton) {
+    volumeButton.isHidden = !appDelegate.storage.settings.user.isShowPlayerVolumeButton
+  }
+
   func refreshPrevNextButtons(previousButton: UIButton, nextButton: UIButton) {
     previousButton.imageView?.contentMode = .scaleAspectFit
     nextButton.imageView?.contentMode = .scaleAspectFit
