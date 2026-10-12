@@ -176,8 +176,9 @@ public class Song: AbstractPlayable, Identifyable {
 
   override public func isAvailableToUser() -> Bool {
     // See also SongMO.excludeServerDeleteUncachedSongsFetchPredicate()
-    remoteStatus != .deleted &&
-      (((size > 0) && (album?.remoteStatus == .available)) || isCached)
+    let isStreamable = (size > 0) && (album?.remoteStatus == .available)
+    let isCachedWithMetadata = isCached && managedObject.title != nil
+    return remoteStatus != .deleted && (isStreamable || isCachedWithMetadata)
   }
 }
 

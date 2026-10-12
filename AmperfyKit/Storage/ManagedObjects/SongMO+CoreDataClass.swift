@@ -51,7 +51,12 @@ extension SongMO: CoreDataIdentifyable {
             RemoteStatus.available.rawValue
           ),
         ]),
-        NSPredicate(format: "%K != nil", #keyPath(SongMO.relFilePath)),
+        // a downloaded song is shown once its metadata is known; songs recreated
+        // from downloaded files during the initial sync only carry their id
+        NSCompoundPredicate(andPredicateWithSubpredicates: [
+          NSPredicate(format: "%K != nil", #keyPath(SongMO.relFilePath)),
+          NSPredicate(format: "%K != nil", #keyPath(SongMO.title)),
+        ]),
       ]),
     ])
   }
