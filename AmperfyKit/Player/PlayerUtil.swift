@@ -69,6 +69,23 @@ public struct RadioNowPlayingInfo: Equatable, Sendable {
   }
 }
 
+// MARK: - PlayableChange
+
+public enum PlayableChange {
+  /// Whether a display update animates the change of the displayed playable: only between two
+  /// different playables and without Reduce Motion, so no animation on first display,
+  /// on refreshes of the same item, or to or from an empty player.
+  public static func isAnimated(
+    from previousPlayableID: String?,
+    to playableID: String?,
+    isReduceMotionEnabled: Bool
+  )
+    -> Bool {
+    guard let previousPlayableID, let playableID else { return false }
+    return previousPlayableID != playableID && !isReduceMotionEnabled
+  }
+}
+
 // MARK: - RepeatMode
 
 public enum RepeatMode: Int16, CaseIterable {

@@ -58,6 +58,10 @@ public class LibraryEntityImage: RoundedImage {
   private var entity: AbstractLibraryEntity?
   private var backupArtworkType: ArtworkType?
   private var accountNotificationHandler: AccountNotificationHandler?
+  // opt-in cross-dissolve of image changes, bound to the entity it was armed for
+  private var isCrossDissolveArmed = false
+  private var crossDissolveEntity: AbstractLibraryEntity?
+  private var crossDissolveDuration: TimeInterval = 0
 
   required public init?(coder: NSCoder) {
     self.appDelegate = AmperKit.shared
@@ -107,7 +111,32 @@ public class LibraryEntityImage: RoundedImage {
     }
   }
 
+  /// Opt-in, default off: every image change of the next entity passed to `display(entity:)`
+  /// cross-dissolves, including artwork that is loaded or downloaded afterwards. Until loaded
+  /// artwork arrives, the previous image stays visible instead of the placeholder.
+  /// Ends when another entity, an artwork type or an image is displayed.
+  public func crossDissolveImageChangesOfNextEntity(duration: TimeInterval) {
+    isCrossDissolveArmed = true
+    crossDissolveDuration = duration
+  }
+
+  private var isCrossDissolveActive: Bool {
+    guard let crossDissolveEntity, let entity else { return false }
+    return crossDissolveEntity == entity
+  }
+
+  private func endCrossDissolve() {
+    isCrossDissolveArmed = false
+    crossDissolveEntity = nil
+  }
+
   public func display(entity: AbstractLibraryEntity) {
+    if isCrossDissolveArmed {
+      isCrossDissolveArmed = false
+      crossDissolveEntity = entity
+    } else if crossDissolveEntity != entity {
+      crossDissolveEntity = nil
+    }
     self.entity = entity
     backupArtworkType = entity.getDefaultArtworkType()
     refresh()
@@ -123,11 +152,13 @@ public class LibraryEntityImage: RoundedImage {
   }
 
   internal func display(image: UIImage) {
+    endCrossDissolve()
     self.image = image
     entity = nil
   }
 
   public func display(artworkType: ArtworkType) {
+    endCrossDissolve()
     backupArtworkType = artworkType
     entity = nil
     refresh()
@@ -161,16 +192,34 @@ public class LibraryEntityImage: RoundedImage {
 
     if let imagePathToDisplay,
        let cachedImg = Self.cache.object(forKey: imagePathToDisplay as NSString) {
-      image = cachedImg
+      setImage(cachedImg)
       return
     }
 
-    image = placeholderImage
+    // during a cross-dissolve the previous image stays until the artwork is loaded
+    if !isCrossDissolveActive || imagePathToDisplay == nil || image == nil {
+      setImage(placeholderImage)
+    }
     guard let imagePathToDisplay else { return }
 
     Task.detached(priority: .high) { [weak self] in
       await self?.loadImageAndCacheIt(imagePath: imagePathToDisplay)
     }
+  }
+
+  private func setImage(_ newImage: UIImage) {
+    guard isCrossDissolveActive, image != nil, image !== newImage,
+          !UIAccessibility.isReduceMotionEnabled
+    else {
+      image = newImage
+      return
+    }
+    UIView.transition(
+      with: self,
+      duration: crossDissolveDuration,
+      options: .transitionCrossDissolve,
+      animations: { self.image = newImage }
+    )
   }
 
   @concurrent
@@ -182,7 +231,14 @@ public class LibraryEntityImage: RoundedImage {
     let readyImage = await loadedImage?.byPreparingForDisplay()
     guard !Task.isCancelled else { return }
     Task { @MainActor [weak self] in
-      guard let self, let readyImage else { return }
+      guard let self else { return }
+      guard let readyImage else {
+        // a kept previous image must not outlive a failed load
+        if isCrossDissolveActive, entityImagePathToDisplay == imagePath {
+          setImage(placeholderImage)
+        }
+        return
+      }
       Self.cache.setObject(readyImage, forKey: imagePath as NSString)
       refresh()
     }

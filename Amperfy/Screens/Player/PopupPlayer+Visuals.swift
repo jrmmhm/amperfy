@@ -24,7 +24,7 @@ import DominantColors
 import UIKit
 
 extension PopupPlayerVC {
-  static let playableChangeAnimationDuration = TimeInterval(0.25)
+  static let playableChangeAnimationDuration = TimeInterval(0.4)
 
   func refresh() {
     refreshContextQueueSectionHeader()
@@ -35,30 +35,43 @@ extension PopupPlayerVC {
   }
 
   func refreshCurrentlyPlayingInfoView() {
-    crossDissolveIfPlayableChanged()
+    let isPlayableChangeAnimated = crossDissolveIfPlayableChanged()
     refreshBackgroundItemArtwork()
+    if isPlayableChangeAnimated {
+      largeCurrentlyPlayingView?.artworkImage
+        .crossDissolveImageChangesOfNextEntity(duration: Self.playableChangeAnimationDuration)
+    }
     largeCurrentlyPlayingView?.refresh()
     for visibleCell in tableView.visibleCells {
       if let currentlyPlayingCell = visibleCell as? CurrentlyPlayingTableCell {
+        if isPlayableChangeAnimated {
+          currentlyPlayingCell.artworkImage
+            .crossDissolveImageChangesOfNextEntity(duration: Self.playableChangeAnimationDuration)
+        }
         currentlyPlayingCell.refresh()
         break
       }
     }
   }
 
-  /// Fades the following content update when another playable started.
+  /// Fades the following content update when another playable started and returns whether it does;
+  /// the artworks then cross-dissolve themselves, also when their image is loaded later.
   /// No fade on first display, to or from an empty player, or with Reduce Motion enabled.
-  private func crossDissolveIfPlayableChanged() {
+  private func crossDissolveIfPlayableChanged() -> Bool {
     let previousPlayableID = displayedPlayableID
     let playableID = player.currentlyPlaying?.uniqueID
     displayedPlayableID = playableID
-    guard let previousPlayableID, let playableID, previousPlayableID != playableID,
-          !UIAccessibility.isReduceMotionEnabled
-    else { return }
+    guard PlayableChange.isAnimated(
+      from: previousPlayableID,
+      to: playableID,
+      isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+    ) else { return false }
 
+    // reloadData() defers re-attaching the cached compact cell to the next layout pass,
+    // and a view removed from the hierarchy loses its animations: lay out before animating
+    tableView.layoutIfNeeded()
     var views: [UIView] = [backgroundImage]
     if let largeCurrentlyPlayingView {
-      views.append(largeCurrentlyPlayingView.artworkImage)
       views.append(largeCurrentlyPlayingView.detailsContainer)
     }
     if let currentlyPlayingTableCell {
@@ -70,6 +83,7 @@ extension PopupPlayerVC {
     for view in views {
       view.layer.add(transition, forKey: kCATransition)
     }
+    return true
   }
 
   func refreshCurrentlyPlayingArtworks() {
