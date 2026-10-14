@@ -175,6 +175,7 @@ class SsRemoteListingParserDelegate: SsXmlParser {
   /// album id per song id of the song elements
   private(set) var songAlbumIDs = [String: String]()
   private var isParsed = false
+  private var isSubsonicResponse = false
 
   /// Returns false if the data is no well-formed XML
   @discardableResult
@@ -203,7 +204,7 @@ class SsRemoteListingParserDelegate: SsXmlParser {
 
   /// Only a well-formed Subsonic answer counts; anything else is treated like a failed request
   private var isSubsonicAnswer: Bool {
-    isParsed && (isStatusOk || error != nil)
+    isParsed && isSubsonicResponse && (isStatusOk || error != nil)
   }
 
   /// getSong answer: "data not found" means deleted. Navidrome still answers with songs whose
@@ -246,6 +247,7 @@ class SsRemoteListingParserDelegate: SsXmlParser {
 
     switch elementName {
     case "subsonic-response":
+      isSubsonicResponse = true
       isStatusOk = attributeDict["status"] == "ok"
     case "album":
       guard let id = attributeDict["id"] else { return }
