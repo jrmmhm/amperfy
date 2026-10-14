@@ -284,10 +284,12 @@ public class MetaManager {
     backgroundLibrarySyncer.start()
     let scrobbler = createScrobbleSyncer(player: player)
     player.addNotifier(notifier: scrobbler)
+    self.player = player
   }
 
   public func startManagerForNormalOperation(player: PlayerFacade) {
     os_log("Start background manager for normal operation", log: self.log, type: .info)
+    self.player = player
     duplicateEntitiesResolver.start()
     artworkDownloadManager.start()
     playableDownloadManager.start()
@@ -304,6 +306,7 @@ public class MetaManager {
   private var remoteDeletionSyncDate: Date?
   private var songListingDate: Date?
   private var remoteDeletionScans = RemoteDeletionScans()
+  private var player: PlayerFacade?
 
   /// Detects albums and songs deleted on the server (app start and pull-to-refresh)
   public func syncRemoteDeletions(isAppStart: Bool = false) async {
@@ -337,6 +340,8 @@ public class MetaManager {
       eventLogger.report(topic: "Remote Deletion Sync", error: error, displayPopup: false)
     }
     isRemoteDeletionSyncRunning = false
+    // the queue view refreshes through the player's playlist notification
+    player?.removeServerDeletedSongsFromQueues()
   }
 
   public func stopManager() {

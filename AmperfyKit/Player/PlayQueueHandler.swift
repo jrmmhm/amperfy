@@ -401,10 +401,34 @@ public class PlayQueueHandler {
     }
   }
 
-  // songs the server reported deleted stay in the queue but are passed over
+  // songs the server reported deleted are removed from the queues after a remote
+  // deletion sync; until then, and while one is playing, they are passed over
   // whenever the player selects the next or previous item
   func isServerDeletedSong(_ playable: AbstractPlayable) -> Bool {
     playable.isSong && playable.remoteStatus == .deleted
+  }
+
+  /// Removes songs the server reported deleted from the prev, user and next queue and keeps
+  /// the currently playing item. Returns true if a song was removed.
+  func removeServerDeletedSongs() -> Bool {
+    func serverDeletedIndices(_ playables: [AbstractPlayable]) -> [Int] {
+      playables.indices.filter { isServerDeletedSong(playables[$0]) }
+    }
+    let nextIndices = serverDeletedIndices(getAllNextQueueItems())
+    let userIndices = serverDeletedIndices(getAllUserQueueItems())
+    let prevIndices = serverDeletedIndices(getAllPrevQueueItems())
+    // descending indices keep the remaining ones valid; the prev queue comes last because
+    // removing from it moves the current index
+    for index in nextIndices.reversed() {
+      removePlayable(at: PlayerIndex(queueType: .next, index: index))
+    }
+    for index in userIndices.reversed() {
+      removePlayable(at: PlayerIndex(queueType: .user, index: index))
+    }
+    for index in prevIndices.reversed() {
+      removePlayable(at: PlayerIndex(queueType: .prev, index: index))
+    }
+    return !(nextIndices.isEmpty && userIndices.isEmpty && prevIndices.isEmpty)
   }
 
   private func isPlayable(_ playable: AbstractPlayable?) -> Bool {

@@ -205,6 +205,7 @@ public protocol PlayerFacade {
   func insertPodcastQueue(playables: [AbstractPlayable])
   func appendPodcastQueue(playables: [AbstractPlayable])
   func removePlayable(at: PlayerIndex)
+  func removeServerDeletedSongsFromQueues()
   func movePlayable(from: PlayerIndex, to: PlayerIndex)
   func clearUserQueue()
   func clearContextQueue()
@@ -567,6 +568,11 @@ class PlayerFacadeImpl: PlayerFacade {
 
   func removePlayable(at: PlayerIndex) {
     queueHandler.removePlayable(at: at)
+  }
+
+  func removeServerDeletedSongsFromQueues() {
+    guard queueHandler.removeServerDeletedSongs() else { return }
+    musicPlayer.notifyPlaylistUpdated()
   }
 
   func movePlayable(from: PlayerIndex, to: PlayerIndex) {
