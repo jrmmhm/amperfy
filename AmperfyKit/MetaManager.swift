@@ -295,6 +295,30 @@ public class MetaManager {
     let scrobbler = createScrobbleSyncer(player: player)
     player.addNotifier(notifier: scrobbler)
     scrobbler.start()
+    Task { await self.syncRemoteDeletions() }
+  }
+
+  private static let remoteDeletionSyncMinInterval: TimeInterval = 60
+  private var isRemoteDeletionSyncRunning = false
+  private var remoteDeletionSyncDate: Date?
+  private var remoteDeletionScans = RemoteDeletionScans()
+
+  /// Detects albums and songs deleted on the server (app start and pull-to-refresh)
+  public func syncRemoteDeletions() async {
+    guard settings.user.isOnlineMode, !isRemoteDeletionSyncRunning else { return }
+    if let remoteDeletionSyncDate,
+       Date().timeIntervalSince(remoteDeletionSyncDate) < Self.remoteDeletionSyncMinInterval {
+      return
+    }
+    isRemoteDeletionSyncRunning = true
+    remoteDeletionSyncDate = Date()
+    do {
+      remoteDeletionScans = try await librarySyncer
+        .syncRemoteDeletions(checkedScans: remoteDeletionScans)
+    } catch {
+      eventLogger.report(topic: "Remote Deletion Sync", error: error, displayPopup: false)
+    }
+    isRemoteDeletionSyncRunning = false
   }
 
   public func stopManager() {

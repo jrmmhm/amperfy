@@ -591,6 +591,7 @@ class AlbumsCommonVCInteractions {
         self.appDelegate.eventLogger.report(topic: "Albums Newest Elements Sync", error: error)
       }
       self.endRefreshCB?()
+      await self.appDelegate.getMeta(self.account.info).syncRemoteDeletions()
     }
   }
 }

@@ -47,6 +47,36 @@ struct LibraryDuplicateInfo {
   let count: Int
 }
 
+// MARK: - RemoteListing
+
+/// The ids a server listed in a complete listing of its library
+struct RemoteListing: Sendable {
+  var albumIDs = Set<String>()
+  /// song count the server reports per album id
+  var albumSongCounts = [String: Int]()
+
+  var count: Int { albumIDs.count }
+  var isEmpty: Bool { albumIDs.isEmpty }
+
+  mutating func merge(_ other: RemoteListing) {
+    albumIDs.formUnion(other.albumIDs)
+    albumSongCounts.merge(other.albumSongCounts) { $1 }
+  }
+}
+
+// MARK: - RemoteAlbumListingCheck
+
+struct RemoteAlbumListingCheck {
+  /// false if the listing is empty or reports too many albums missing to be trusted
+  var isPlausible = false
+  /// available albums the listing does not contain; deleted only after the server confirms
+  var absentAlbums = [Album]()
+  /// song-synced albums with more local songs than the server reports
+  var albumsWithRemovedSongs = [Album]()
+  /// albums marked deleted that the listing contains again
+  var reappearedAlbums = [Album]()
+}
+
 // MARK: - LibraryStorage
 
 public class LibraryStorage: PlayableFileCachable {
@@ -1472,6 +1502,47 @@ public class LibraryStorage: PlayableFileCachable {
     ])
     let albums = try? context.fetch(fetchRequest)
     return albums?.lazy.compactMap { Album(managedObject: $0) } ?? [Album]()
+  }
+
+  static let maxRemoteDeletionCandidates = 20
+
+  /// A server answer that reports more than 20 or more than a tenth of the local items as
+  /// missing is not trusted; a small library may still lose one item
+  static func isRemoteDeletionPlausible(candidateCount: Int, localCount: Int) -> Bool {
+    candidateCount <= maxRemoteDeletionCandidates && candidateCount <= max(1, localCount / 10)
+  }
+
+  func checkRemoteAlbumListing(for account: Account, listing: RemoteListing)
+    -> RemoteAlbumListingCheck {
+    guard !listing.isEmpty else { return RemoteAlbumListingCheck() }
+    let fetchRequest: NSFetchRequest<AlbumMO> = AlbumMO.identifierSortedFetchRequest
+    fetchRequest.predicate = getFetchPredicate(forAccount: account)
+    let albums = ((try? context.fetch(fetchRequest)) ?? [])
+      .map { Album(managedObject: $0) }
+      .filter { !$0.id.isEmpty }
+    let availableAlbums = albums.filter { $0.remoteStatus == .available }
+    let absentAlbums = availableAlbums.filter { !listing.albumIDs.contains($0.id) }
+    guard Self.isRemoteDeletionPlausible(
+      candidateCount: absentAlbums.count,
+      localCount: availableAlbums.count
+    ) else { return RemoteAlbumListingCheck() }
+
+    // Navidrome counts songs whose files are missing, so only a lower server count is a hint
+    let albumsWithRemovedSongs = availableAlbums.filter { album in
+      guard album.isSongsMetaDataSynced,
+            let remoteSongCount = listing.albumSongCounts[album.id] else { return false }
+      return Int(album.managedObject.songCount) > remoteSongCount
+    }
+    return RemoteAlbumListingCheck(
+      isPlausible: true,
+      absentAlbums: absentAlbums,
+      albumsWithRemovedSongs: Array(
+        albumsWithRemovedSongs
+          .prefix(Self.maxRemoteDeletionCandidates)
+      ),
+      reappearedAlbums: albums
+        .filter { $0.remoteStatus == .deleted && listing.albumIDs.contains($0.id) }
+    )
   }
 
   // MARK: Podcasts

@@ -155,6 +155,8 @@ final class MOCK_LibrarySyncer: LibrarySyncer {
   func sync(song: Song) async throws {}
   func sync(podcast: Podcast) async throws {}
   func syncNewestPodcastEpisodes() async throws {}
+  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+    -> RemoteDeletionScans { checkedScans }
   func syncNewestAlbums(offset: Int, count: Int) async throws {}
   func syncRecentAlbums(offset: Int, count: Int) async throws {}
   func syncFavoriteLibraryElements() async throws {}

@@ -90,6 +90,12 @@ extension LibrarySyncerProxy: LibrarySyncer {
   }
 
   @MainActor
+  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+    -> RemoteDeletionScans {
+    try await activeSyncer.syncRemoteDeletions(checkedScans: checkedScans)
+  }
+
+  @MainActor
   func syncFavoriteLibraryElements() async throws {
     try await activeSyncer.syncFavoriteLibraryElements()
   }

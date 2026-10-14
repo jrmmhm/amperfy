@@ -517,6 +517,7 @@ class SongsVC: SingleFetchedResultsTableViewController<SongMO> {
       }
       detailHeaderView?.refresh()
       self.refreshControl?.endRefreshing()
+      await self.appDelegate.getMeta(self.account.info).syncRemoteDeletions()
     }
   }
 }

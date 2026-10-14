@@ -24,6 +24,8 @@ import Foundation
 import os.log
 import UIKit
 
+// MARK: - SsIDsParserDelegate
+
 class SsIDsParserDelegate: SsNotifiableXmlParser {
   public private(set) var prefetchIDs = LibraryStorage.PrefetchIdContainer()
   private var isIndex = false
@@ -120,5 +122,93 @@ class SsIDsParserDelegate: SsNotifiableXmlParser {
       namespaceURI: namespaceURI,
       qualifiedName: qName
     )
+  }
+}
+
+// MARK: - RemoteListingPage
+
+struct RemoteListingPage: Sendable {
+  var listing = RemoteListing()
+  var entryCount = 0
+}
+
+// MARK: - RemoteAlbumVerdict
+
+enum RemoteAlbumVerdict: Sendable {
+  case available
+  case deleted
+  case unknown
+}
+
+// MARK: - SsRemoteListingParserDelegate
+
+/// Reads only ids and counts of a listing response and never touches the library
+class SsRemoteListingParserDelegate: SsXmlParser {
+  private(set) var page = RemoteListingPage()
+  private(set) var isStatusOk = false
+  private(set) var songElementCount = 0
+  private(set) var serverScan = RemoteServerScan()
+  private var isParsed = false
+
+  /// Returns false if the data is no well-formed XML
+  @discardableResult
+  func parse(data: Data) -> Bool {
+    let parser = XMLParser(data: data)
+    parser.delegate = self
+    isParsed = parser.parse()
+    return isParsed
+  }
+
+  /// A listing page counts only if it is a well-formed Subsonic answer without an error
+  var isValidPage: Bool {
+    isParsed && isStatusOk && error == nil
+  }
+
+  /// getAlbum answer: an album without songs (Navidrome keeps deleted albums as "missing")
+  /// or "data not found" means deleted; everything else is no evidence
+  var albumVerdict: RemoteAlbumVerdict {
+    guard isParsed else { return .unknown }
+    if let error {
+      return error.subsonicError == .requestedDataNotFound ? .deleted : .unknown
+    }
+    guard isStatusOk, !page.listing.albumIDs.isEmpty else { return .unknown }
+    return songElementCount == 0 ? .deleted : .available
+  }
+
+  override func parser(
+    _ parser: XMLParser,
+    didStartElement elementName: String,
+    namespaceURI: String?,
+    qualifiedName qName: String?,
+    attributes attributeDict: [String: String]
+  ) {
+    super.parser(
+      parser,
+      didStartElement: elementName,
+      namespaceURI: namespaceURI,
+      qualifiedName: qName,
+      attributes: attributeDict
+    )
+
+    switch elementName {
+    case "subsonic-response":
+      isStatusOk = attributeDict["status"] == "ok"
+    case "album":
+      guard let id = attributeDict["id"] else { return }
+      page.entryCount += 1
+      page.listing.albumIDs.insert(id)
+      if let songCount = Int(attributeDict["songCount"] ?? "") {
+        page.listing.albumSongCounts[id] = songCount
+      }
+    case "song":
+      songElementCount += 1
+    case "scanStatus":
+      serverScan = RemoteServerScan(
+        lastScan: attributeDict["lastScan"],
+        isScanning: attributeDict["scanning"] == "true"
+      )
+    default:
+      break
+    }
   }
 }

@@ -132,6 +132,38 @@ public struct LyricsLine {
   }
 }
 
+// MARK: - RemoteServerScan
+
+/// The library scan state the server reports (getScanStatus)
+public struct RemoteServerScan: Sendable {
+  public var lastScan: String?
+  public var isScanning = false
+
+  public init(lastScan: String? = nil, isScanning: Bool = false) {
+    self.lastScan = lastScan
+    self.isScanning = isScanning
+  }
+}
+
+// MARK: - RemoteDeletionScans
+
+/// The server library scans the remote deletion check has already been run against
+public struct RemoteDeletionScans: Sendable, Equatable {
+  public var albumListing: String?
+
+  public init(albumListing: String? = nil) {
+    self.albumListing = albumListing
+  }
+
+  /// Nothing can be deleted on the server without a library scan. A server that reports no
+  /// scan is checked every time; a server that is scanning right now is not checked.
+  func isAlbumListingNeeded(serverScan: RemoteServerScan) -> Bool {
+    guard !serverScan.isScanning else { return false }
+    guard let lastScan = serverScan.lastScan else { return true }
+    return lastScan != albumListing
+  }
+}
+
 // MARK: - LibrarySyncer
 
 public protocol LibrarySyncer: Sendable {
@@ -153,6 +185,10 @@ public protocol LibrarySyncer: Sendable {
   func syncRecentAlbums(offset: Int, count: Int) async throws
   @MainActor
   func syncNewestPodcastEpisodes() async throws
+  /// Detects albums and songs the server deleted and marks them; returns the scans checked
+  @MainActor
+  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+    -> RemoteDeletionScans
   @MainActor
   func syncFavoriteLibraryElements() async throws
   @MainActor

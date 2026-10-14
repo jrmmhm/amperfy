@@ -654,6 +654,13 @@ final class SubsonicServerApi: URLCleanser, Sendable {
     }
   }
 
+  public func requestScanStatus() async throws -> APIDataResponse {
+    try await request { version in
+      let urlComp = try self.createAuthApiUrlComponent(version: version, forAction: "getScanStatus")
+      return try self.createUrl(from: urlComp)
+    }
+  }
+
   public func requestRandomSongs(count: Int) async throws -> APIDataResponse {
     try await request { version in
       var urlComp = try self.createAuthApiUrlComponent(
