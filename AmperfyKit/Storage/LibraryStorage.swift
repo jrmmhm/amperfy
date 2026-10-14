@@ -1592,8 +1592,11 @@ public class LibraryStorage: PlayableFileCachable {
         albumsWithRemovedSongs
           .prefix(Self.maxRemoteDeletionCandidates)
       ),
-      reappearedAlbums: albums
-        .filter { $0.remoteStatus == .deleted && listing.albumIDs.contains($0.id) }
+      // an album listed with no songs left stays deleted
+      reappearedAlbums: albums.filter {
+        $0.remoteStatus == .deleted && listing.albumIDs.contains($0.id) &&
+          (listing.albumSongCounts[$0.id] ?? 1) > 0
+      }
     )
   }
 
