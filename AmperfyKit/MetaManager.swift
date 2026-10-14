@@ -306,6 +306,8 @@ public class MetaManager {
   private var remoteDeletionSyncDate: Date?
   private var songListingDate: Date?
   private var remoteDeletionScans = RemoteDeletionScans()
+  /// downloads of songs the server deleted that the guard holds back, kept in memory only
+  private var heldServerDeletedDownloads = [String: ServerDeletedDownloadEvidence]()
   private var player: PlayerFacade?
 
   /// Detects albums and songs deleted on the server (app start and pull-to-refresh)
@@ -316,6 +318,7 @@ public class MetaManager {
       return
     }
     isRemoteDeletionSyncRunning = true
+    defer { isRemoteDeletionSyncRunning = false }
     remoteDeletionSyncDate = Date()
     // the song listing pages the whole library: never at app start, only on Wi-Fi or
     // Ethernet and at most every 30 minutes
@@ -324,24 +327,82 @@ public class MetaManager {
        Date().timeIntervalSince(songListingDate) < Self.songListingMinInterval {
       isSongListingAllowed = false
     }
+    var run: RemoteDeletionRun?
     do {
-      let scans = try await librarySyncer.syncRemoteDeletions(
+      let checkedRun = try await librarySyncer.syncRemoteDeletions(
         checkedScans: remoteDeletionScans,
         isSongListingAllowed: isSongListingAllowed
       )
-      if scans.songListing != remoteDeletionScans.songListing {
+      if checkedRun.scans.songListing != remoteDeletionScans.songListing {
         songListingDate = Date()
       }
-      remoteDeletionScans = scans
+      remoteDeletionScans = checkedRun.scans
+      run = checkedRun
     } catch {
       if isSongListingAllowed {
         songListingDate = Date()
       }
       eventLogger.report(topic: "Remote Deletion Sync", error: error, displayPopup: false)
     }
-    isRemoteDeletionSyncRunning = false
     // the queue view refreshes through the player's playlist notification
     player?.removeServerDeletedSongsFromQueues()
+    await deleteDownloadsOfServerDeletedSongs(run: run)
+  }
+
+  private var isDeleteDownloadsOfServerDeletedSongs: Bool {
+    settings.user.isDeleteDownloadsOfServerDeletedSongs &&
+      (account.apiType == .subsonic || account.apiType == .subsonic_legacy)
+  }
+
+  /// Deletes the downloads of songs the server deleted if the user opted in. Only Subsonic
+  /// servers can confirm a deleted song, and each download goes only after the server did.
+  private func deleteDownloadsOfServerDeletedSongs(run: RemoteDeletionRun?) async {
+    guard let player else { return }
+    let library = storage.main.library
+    let isEnabled = isDeleteDownloadsOfServerDeletedSongs
+    let candidates = isEnabled ? library.getServerDeletedCachedSongs(for: account) : [Song]()
+    let decision = LibraryStorage.decideServerDeletedDownloads(
+      isEnabled: isEnabled,
+      run: run,
+      candidateIDs: Set(candidates.map { $0.id }),
+      playingSongID: player.currentlyPlaying?.asSong?.id,
+      cachedSongCount: isEnabled ? library.getCachedSongCount(for: account) : 0,
+      heldSongs: heldServerDeletedDownloads,
+      now: Date()
+    )
+    heldServerDeletedDownloads = decision.heldSongs
+    if !decision.heldSongs.isEmpty {
+      os_log(
+        "%i downloads of songs deleted on the server are kept until a later sync confirms",
+        log: log,
+        type: .info,
+        decision.heldSongs.count
+      )
+    }
+    guard !decision.songsToDelete.isEmpty else { return }
+    let verification = await librarySyncer
+      .verifyRemoteDeletion(ofSongsWithIDs: decision.songsToDelete.keys.sorted())
+    heldServerDeletedDownloads = decision
+      .heldSongs(addingUnchecked: verification.uncheckedSongIDs)
+    // the user may have turned the setting off while the server was asked
+    guard isDeleteDownloadsOfServerDeletedSongs else {
+      heldServerDeletedDownloads = [:]
+      return
+    }
+    let deletedSongs = library.deleteCacheOfServerDeletedSongs(
+      for: account,
+      songIDs: verification.deletedSongIDs,
+      playingSongID: player.currentlyPlaying?.asSong?.id
+    )
+    guard !deletedSongs.isEmpty else { return }
+    os_log(
+      "Deleted %i downloads of songs deleted on the server",
+      log: log,
+      type: .info,
+      deletedSongs.count
+    )
+    playableDownloadManager.removeFinishedDownload(for: deletedSongs)
+    storage.main.saveContext()
   }
 
   public func stopManager() {

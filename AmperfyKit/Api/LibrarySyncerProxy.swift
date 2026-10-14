@@ -94,11 +94,17 @@ extension LibrarySyncerProxy: LibrarySyncer {
     checkedScans: RemoteDeletionScans,
     isSongListingAllowed: Bool
   ) async throws
-    -> RemoteDeletionScans {
+    -> RemoteDeletionRun {
     try await activeSyncer.syncRemoteDeletions(
       checkedScans: checkedScans,
       isSongListingAllowed: isSongListingAllowed
     )
+  }
+
+  @MainActor
+  func verifyRemoteDeletion(ofSongsWithIDs songIDs: [String]) async
+    -> RemoteSongDeletionVerification {
+    await activeSyncer.verifyRemoteDeletion(ofSongsWithIDs: songIDs)
   }
 
   @MainActor

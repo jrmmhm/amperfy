@@ -231,6 +231,13 @@ class SettingsHostVC: UIViewController {
       self.appDelegate.storage.settings.user.cacheLimit = newValue
     }))
 
+    settings.isDeleteDownloadsOfServerDeletedSongs = appDelegate.storage.settings.user
+      .isDeleteDownloadsOfServerDeletedSongs
+    changesAgent
+      .append(settings.$isDeleteDownloadsOfServerDeletedSongs.sink(receiveValue: { newValue in
+        self.appDelegate.storage.settings.user.isDeleteDownloadsOfServerDeletedSongs = newValue
+      }))
+
     settings.isHapticsEnabled = appDelegate.storage.settings.user.isHapticsEnabled
     changesAgent.append(settings.$isHapticsEnabled.sink(receiveValue: { newValue in
       self.appDelegate.storage.settings.user.isHapticsEnabled = newValue

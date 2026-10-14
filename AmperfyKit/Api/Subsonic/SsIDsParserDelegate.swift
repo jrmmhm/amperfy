@@ -140,6 +140,30 @@ enum RemoteAlbumVerdict: Sendable {
   case unknown
 }
 
+// MARK: - RemoteSongAnswer
+
+/// What a getSong request says about one song
+enum RemoteSongAnswer: Sendable, Equatable {
+  /// no Subsonic answer arrived (transport error, proxy error page)
+  case noAnswer
+  case deleted
+  /// the server still has the song in this album
+  case inAlbum(String)
+  case unknown
+}
+
+// MARK: - RemoteAlbumAnswer
+
+/// What a getAlbum request says about the songs of one album
+enum RemoteAlbumAnswer: Sendable, Equatable {
+  /// no Subsonic answer arrived (transport error, proxy error page)
+  case noAnswer
+  case deleted
+  /// the complete song list of the album
+  case songs(Set<String>)
+  case unknown
+}
+
 // MARK: - SsRemoteListingParserDelegate
 
 /// Reads only ids and counts of a listing response and never touches the library
@@ -148,6 +172,8 @@ class SsRemoteListingParserDelegate: SsXmlParser {
   private(set) var isStatusOk = false
   private(set) var songElementCount = 0
   private(set) var serverScan = RemoteServerScan()
+  /// album id per song id of the song elements
+  private(set) var songAlbumIDs = [String: String]()
   private var isParsed = false
 
   /// Returns false if the data is no well-formed XML
@@ -173,6 +199,34 @@ class SsRemoteListingParserDelegate: SsXmlParser {
     }
     guard isStatusOk, !page.listing.albumIDs.isEmpty else { return .unknown }
     return songElementCount == 0 ? .deleted : .available
+  }
+
+  /// Only a well-formed Subsonic answer counts; anything else is treated like a failed request
+  private var isSubsonicAnswer: Bool {
+    isParsed && (isStatusOk || error != nil)
+  }
+
+  /// getSong answer: "data not found" means deleted. Navidrome still answers with songs whose
+  /// file is missing, so a found song only names the album to check next.
+  func songAnswer(songID: String) -> RemoteSongAnswer {
+    guard isSubsonicAnswer else { return .noAnswer }
+    if let error {
+      return error.subsonicError == .requestedDataNotFound ? .deleted : .unknown
+    }
+    guard let albumID = songAlbumIDs[songID], !albumID.isEmpty else { return .unknown }
+    return .inAlbum(albumID)
+  }
+
+  /// getAlbum answer: "data not found" means deleted. Otherwise only the requested album with
+  /// an id for every song element counts; Navidrome leaves out songs whose file is missing.
+  func albumAnswer(albumID: String) -> RemoteAlbumAnswer {
+    guard isSubsonicAnswer else { return .noAnswer }
+    if let error {
+      return error.subsonicError == .requestedDataNotFound ? .deleted : .unknown
+    }
+    guard page.listing.albumIDs == [albumID],
+          songElementCount == page.listing.songIDs.count else { return .unknown }
+    return .songs(page.listing.songIDs)
   }
 
   override func parser(
@@ -205,6 +259,9 @@ class SsRemoteListingParserDelegate: SsXmlParser {
       guard let id = attributeDict["id"] else { return }
       page.entryCount += 1
       page.listing.songIDs.insert(id)
+      if let albumID = attributeDict["albumId"] {
+        songAlbumIDs[id] = albumID
+      }
     case "scanStatus":
       serverScan = RemoteServerScan(
         lastScan: attributeDict["lastScan"],

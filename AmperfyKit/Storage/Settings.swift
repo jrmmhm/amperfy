@@ -310,6 +310,13 @@ public struct UserSettings: Sendable, Codable {
     }
     set { _albumsGridSizeSetting = newValue }
   }
+
+  // optional: settings saved before this key existed must still decode
+  private var _isDeleteDownloadsOfServerDeletedSongs: Bool?
+  public var isDeleteDownloadsOfServerDeletedSongs: Bool {
+    get { _isDeleteDownloadsOfServerDeletedSongs ?? false }
+    set { _isDeleteDownloadsOfServerDeletedSongs = newValue }
+  }
 }
 
 // MARK: - AccountSetting

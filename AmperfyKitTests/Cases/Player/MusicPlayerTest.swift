@@ -159,7 +159,12 @@ final class MOCK_LibrarySyncer: LibrarySyncer {
     checkedScans: RemoteDeletionScans,
     isSongListingAllowed: Bool
   ) async throws
-    -> RemoteDeletionScans { checkedScans }
+    -> RemoteDeletionRun { RemoteDeletionRun(scans: checkedScans) }
+  func verifyRemoteDeletion(ofSongsWithIDs songIDs: [String]) async
+    -> RemoteSongDeletionVerification {
+    RemoteSongDeletionVerification(uncheckedSongIDs: Set(songIDs))
+  }
+
   func syncNewestAlbums(offset: Int, count: Int) async throws {}
   func syncRecentAlbums(offset: Int, count: Int) async throws {}
   func syncFavoriteLibraryElements() async throws {}

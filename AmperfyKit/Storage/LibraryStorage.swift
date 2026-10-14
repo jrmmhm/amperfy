@@ -79,6 +79,47 @@ struct RemoteAlbumListingCheck {
   var reappearedAlbums = [Album]()
 }
 
+// MARK: - ServerDeletedDownloadEvidence
+
+/// The remote deletion run that held back the download of a song the server deleted
+struct ServerDeletedDownloadEvidence: Sendable, Equatable {
+  /// album listing scan of the run, nil if the server reported none
+  var scan: String?
+  var date: Date
+
+  static let minConfirmationInterval: TimeInterval = 30 * 60
+
+  /// A later run confirms with a newer server scan or, if neither run knows a scan, at least
+  /// 30 minutes later. A run without a scan never confirms a run with one.
+  func isConfirmed(by laterEvidence: ServerDeletedDownloadEvidence) -> Bool {
+    switch (scan, laterEvidence.scan) {
+    case let (.some(heldScan), .some(laterScan)):
+      return heldScan != laterScan
+    case (.none, .none):
+      return laterEvidence.date.timeIntervalSince(date) >= Self.minConfirmationInterval
+    default:
+      return false
+    }
+  }
+}
+
+// MARK: - ServerDeletedDownloadsDecision
+
+struct ServerDeletedDownloadsDecision: Equatable {
+  /// songs to check with the server and delete now, with the evidence to hold them by
+  var songsToDelete = [String: ServerDeletedDownloadEvidence]()
+  /// songs held back until a later run confirms
+  var heldSongs = [String: ServerDeletedDownloadEvidence]()
+
+  /// Songs whose server check did not finish are held again
+  func heldSongs(addingUnchecked uncheckedSongIDs: Set<String>)
+    -> [String: ServerDeletedDownloadEvidence] {
+    heldSongs.merging(songsToDelete.filter { uncheckedSongIDs.contains($0.key) }) { held, _ in
+      held
+    }
+  }
+}
+
 // MARK: - LibraryStorage
 
 public class LibraryStorage: PlayableFileCachable {
@@ -1596,6 +1637,96 @@ public class LibraryStorage: PlayableFileCachable {
       localCount: syncedAlbumCount
     ) else { return nil }
     return albumsWithMissingSongs
+  }
+
+  /// Downloaded songs the server deleted whose album is deleted as well or that left their
+  /// album. Songs of an album the server lists again stay until the album is song-synced again.
+  func getServerDeletedCachedSongs(for account: Account) -> [Song] {
+    let fetchRequest = SongMO.identifierSortedFetchRequest
+    fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+      getFetchPredicate(forAccount: account),
+      getFetchPredicate(onlyCachedSongs: true),
+      NSPredicate(
+        format: "%K == %i",
+        #keyPath(SongMO.remoteStatus),
+        RemoteStatus.deleted.rawValue
+      ),
+      NSCompoundPredicate(orPredicateWithSubpredicates: [
+        NSPredicate(format: "%K == nil", #keyPath(SongMO.album)),
+        NSPredicate(
+          format: "%K == %i",
+          #keyPath(SongMO.album.remoteStatus),
+          RemoteStatus.deleted.rawValue
+        ),
+      ]),
+    ])
+    let foundSongs = try? context.fetch(fetchRequest)
+    return foundSongs?.compactMap { Song(managedObject: $0) } ?? [Song]()
+  }
+
+  /// Decides which downloads of songs the server deleted go in this run. Only a run with a
+  /// trusted listing deletes or holds; more songs than the remote deletion guard allows are
+  /// held until a later run confirms them. The playing song is neither deleted nor counted.
+  static func decideServerDeletedDownloads(
+    isEnabled: Bool,
+    run: RemoteDeletionRun?,
+    candidateIDs: Set<String>,
+    playingSongID: String?,
+    cachedSongCount: Int,
+    heldSongs: [String: ServerDeletedDownloadEvidence],
+    now: Date
+  )
+    -> ServerDeletedDownloadsDecision {
+    guard isEnabled else { return ServerDeletedDownloadsDecision() }
+    var decision = ServerDeletedDownloadsDecision(
+      heldSongs: heldSongs.filter { candidateIDs.contains($0.key) }
+    )
+    guard let run, run.isListingTrusted, !run.isGuardTripped else { return decision }
+    let runEvidence = ServerDeletedDownloadEvidence(scan: run.scans.albumListing, date: now)
+    var freshIDs = candidateIDs.subtracting(decision.heldSongs.keys)
+    if let playingSongID {
+      freshIDs.remove(playingSongID)
+    }
+    for (songID, evidence) in decision.heldSongs where songID != playingSongID {
+      if evidence.isConfirmed(by: runEvidence) {
+        decision.songsToDelete[songID] = evidence
+        decision.heldSongs[songID] = nil
+      } else if evidence.scan == nil, runEvidence.scan != nil {
+        // from now on a newer server scan confirms
+        decision.heldSongs[songID] = runEvidence
+      }
+    }
+    guard !freshIDs.isEmpty else { return decision }
+    if isRemoteDeletionPlausible(candidateCount: freshIDs.count, localCount: cachedSongCount) {
+      freshIDs.forEach { decision.songsToDelete[$0] = runEvidence }
+    } else {
+      freshIDs.forEach { decision.heldSongs[$0] = runEvidence }
+    }
+    return decision
+  }
+
+  /// Deletes the downloads of the given songs that are still downloaded songs the server
+  /// deleted. Skips the playing song and a song whose file is shared by a downloaded song with
+  /// the same id the server did not delete. Returns the songs whose download was deleted.
+  func deleteCacheOfServerDeletedSongs(
+    for account: Account,
+    songIDs: Set<String>,
+    playingSongID: String?
+  )
+    -> [Song] {
+    guard !songIDs.isEmpty else { return [Song]() }
+    let candidates = getServerDeletedCachedSongs(for: account)
+    let candidateObjectIDs = Set(candidates.map { $0.managedObject.objectID })
+    let sharedIDs = Set(
+      getCachedSongs(for: account)
+        .filter { !candidateObjectIDs.contains($0.managedObject.objectID) }
+        .map { $0.id }
+    )
+    let songs = candidates.filter {
+      songIDs.contains($0.id) && $0.id != playingSongID && !sharedIDs.contains($0.id)
+    }
+    songs.forEach { deleteCache(ofPlayable: $0) }
+    return songs
   }
 
   // MARK: Podcasts

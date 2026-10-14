@@ -267,6 +267,17 @@ struct LibrarySettingsView: View {
             }
           }
         }, header: "Cache")
+
+        SettingsSection(
+          content: {
+            SettingsCheckBoxRow(
+              title: "Delete Downloads of Removed Songs",
+              isOn: $settings.isDeleteDownloadsOfServerDeletedSongs
+            )
+          },
+          footer:
+          "Downloads of songs that were removed from the server are deleted from this device after a library sync. If one sync finds many removed songs at once, they are only hidden until a later sync confirms the removal."
+        )
       }
     }
     .navigationTitle("Library")

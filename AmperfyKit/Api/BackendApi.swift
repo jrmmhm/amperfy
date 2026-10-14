@@ -174,6 +174,40 @@ public struct RemoteDeletionScans: Sendable, Equatable {
   }
 }
 
+// MARK: - RemoteDeletionRun
+
+/// What one remote deletion sync checked
+public struct RemoteDeletionRun: Sendable, Equatable {
+  public var scans: RemoteDeletionScans
+  /// a complete listing ran and its guard trusted it
+  public var isListingTrusted = false
+  /// a complete listing ran but its guard did not trust it
+  public var isGuardTripped = false
+
+  public init(
+    scans: RemoteDeletionScans,
+    isListingTrusted: Bool = false,
+    isGuardTripped: Bool = false
+  ) {
+    self.scans = scans
+    self.isListingTrusted = isListingTrusted
+    self.isGuardTripped = isGuardTripped
+  }
+}
+
+// MARK: - RemoteSongDeletionVerification
+
+/// The songs the server confirmed deleted, and the songs not checked because a request failed
+public struct RemoteSongDeletionVerification: Sendable, Equatable {
+  public var deletedSongIDs = Set<String>()
+  public var uncheckedSongIDs = Set<String>()
+
+  public init(deletedSongIDs: Set<String> = [], uncheckedSongIDs: Set<String> = []) {
+    self.deletedSongIDs = deletedSongIDs
+    self.uncheckedSongIDs = uncheckedSongIDs
+  }
+}
+
 // MARK: - LibrarySyncer
 
 public protocol LibrarySyncer: Sendable {
@@ -195,13 +229,17 @@ public protocol LibrarySyncer: Sendable {
   func syncRecentAlbums(offset: Int, count: Int) async throws
   @MainActor
   func syncNewestPodcastEpisodes() async throws
-  /// Detects albums and songs the server deleted and marks them; returns the scans checked
+  /// Detects albums and songs the server deleted and marks them; returns what was checked
   @MainActor
   func syncRemoteDeletions(
     checkedScans: RemoteDeletionScans,
     isSongListingAllowed: Bool
   ) async throws
-    -> RemoteDeletionScans
+    -> RemoteDeletionRun
+  /// Asks the server about each song, one after the other, and stops at the first failing request
+  @MainActor
+  func verifyRemoteDeletion(ofSongsWithIDs songIDs: [String]) async
+    -> RemoteSongDeletionVerification
   @MainActor
   func syncFavoriteLibraryElements() async throws
   @MainActor

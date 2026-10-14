@@ -517,8 +517,10 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
     checkedScans: RemoteDeletionScans,
     isSongListingAllowed: Bool
   ) async throws
-    -> RemoteDeletionScans {
-    guard isSyncAllowed else { return checkedScans }
+    -> RemoteDeletionRun {
+    guard isSyncAllowed else { return RemoteDeletionRun(scans: checkedScans) }
+    var isListingTrusted = false
+    var isGuardTripped = false
     let serverScan = await requestServerScan()
     let scans = try await Self.checkAlbumListing(
       checkedScans: checkedScans,
@@ -530,11 +532,18 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         )
         return try self.parseListingPage(response: response)
       },
-      checkListing: { listing in try await self.checkRemoteAlbumListing(listing) },
+      checkListing: { listing in
+        guard let candidates = try await self.checkRemoteAlbumListing(listing) else {
+          isGuardTripped = true
+          return RemoteAlbumCandidates()
+        }
+        isListingTrusted = true
+        return candidates
+      },
       verifyDeletion: { albumID in await self.verifyRemoteDeletion(ofAlbumWithID: albumID) },
       resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
     )
-    return try await Self.checkSongListing(
+    let checkedRunScans = try await Self.checkSongListing(
       checkedScans: scans,
       serverScan: serverScan,
       isSongListingAllowed: isSongListingAllowed,
@@ -545,12 +554,120 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         )
         return try self.parseListingPage(response: response)
       },
-      checkListing: { listing in try await self.checkRemoteSongListing(listing) },
+      checkListing: { listing in
+        let albumIDs = try await self.checkRemoteSongListing(listing)
+        // a server without the empty search3 query neither trusts nor trips the check
+        guard !listing.songIDs.isEmpty else { return [String]() }
+        guard let albumIDs else {
+          isGuardTripped = true
+          return [String]()
+        }
+        isListingTrusted = true
+        return albumIDs
+      },
       resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
+    )
+    return RemoteDeletionRun(
+      scans: checkedRunScans,
+      isListingTrusted: isListingTrusted,
+      isGuardTripped: isGuardTripped
     )
   }
 
-  private func checkRemoteSongListing(_ listing: RemoteListing) async throws -> [String] {
+  @MainActor
+  func verifyRemoteDeletion(ofSongsWithIDs songIDs: [String]) async
+    -> RemoteSongDeletionVerification {
+    guard isSyncAllowed else {
+      return RemoteSongDeletionVerification(uncheckedSongIDs: Set(songIDs))
+    }
+    return await Self.verifySongDeletions(
+      songIDs: songIDs,
+      requestSong: { songID in await self.requestSongAnswer(songID: songID) },
+      requestAlbum: { albumID in await self.requestAlbumAnswer(albumID: albumID) }
+    )
+  }
+
+  /// Asks about one song after the other and deletes only on a positive answer: getSong
+  /// "data not found", or the song's album without the song. The first request without a
+  /// Subsonic answer stops the check; that song and all after it stay unchecked.
+  static func verifySongDeletions(
+    songIDs: [String],
+    requestSong: (_ songID: String) async -> RemoteSongAnswer,
+    requestAlbum: (_ albumID: String) async -> RemoteAlbumAnswer
+  ) async
+    -> RemoteSongDeletionVerification {
+    var verification = RemoteSongDeletionVerification()
+    var albumAnswers = [String: RemoteAlbumAnswer]()
+    for (index, songID) in songIDs.enumerated() {
+      var isDeleted = false
+      var isAnswered = true
+      switch await requestSong(songID) {
+      case .noAnswer:
+        isAnswered = false
+      case .deleted:
+        isDeleted = true
+      case let .inAlbum(albumID):
+        let albumAnswer: RemoteAlbumAnswer
+        if let knownAnswer = albumAnswers[albumID] {
+          albumAnswer = knownAnswer
+        } else {
+          albumAnswer = await requestAlbum(albumID)
+          albumAnswers[albumID] = albumAnswer
+        }
+        switch albumAnswer {
+        case .noAnswer:
+          isAnswered = false
+        case .deleted:
+          isDeleted = true
+        case let .songs(albumSongIDs):
+          isDeleted = !albumSongIDs.contains(songID)
+        case .unknown:
+          break
+        }
+      case .unknown:
+        break
+      }
+      guard isAnswered else {
+        verification.uncheckedSongIDs = Set(songIDs[index...])
+        return verification
+      }
+      if isDeleted {
+        verification.deletedSongIDs.insert(songID)
+      }
+    }
+    return verification
+  }
+
+  private func requestSongAnswer(songID: String) async -> RemoteSongAnswer {
+    let data: Data?
+    do {
+      data = try await subsonicServerApi.requestSongInfo(id: songID).data
+    } catch {
+      // a 404 answer may still carry a Subsonic error
+      data = (error as? ResponseError)?.data
+    }
+    guard let data else { return .noAnswer }
+    let parserDelegate = SsRemoteListingParserDelegate(performanceMonitor: performanceMonitor)
+    parserDelegate.parse(data: data)
+    return parserDelegate.songAnswer(songID: songID)
+  }
+
+  private func requestAlbumAnswer(albumID: String) async -> RemoteAlbumAnswer {
+    let data: Data?
+    do {
+      data = try await subsonicServerApi.requestAlbum(id: albumID).data
+    } catch {
+      // a 404 answer may still carry a Subsonic error
+      data = (error as? ResponseError)?.data
+    }
+    guard let data else { return .noAnswer }
+    let parserDelegate = SsRemoteListingParserDelegate(performanceMonitor: performanceMonitor)
+    parserDelegate.parse(data: data)
+    return parserDelegate.albumAnswer(albumID: albumID)
+  }
+
+  /// Returns nil if the listing is not trusted
+  private func checkRemoteSongListing(_ listing: RemoteListing) async throws -> [String]? {
     try await storage.async.performAndGet { asyncCompanion in
       let accountAsync = asyncCompanion.library.getAccount(managedObjectId: self.accountObjectId)
       guard let albums = asyncCompanion.library.getAlbumsWithSongsMissing(
@@ -563,7 +680,7 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
           type: .info,
           listing.songIDs.count
         )
-        return [String]()
+        return nil
       }
       return albums.map { $0.id }
     }
@@ -590,8 +707,9 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
     return parserDelegate.page
   }
 
+  /// Returns nil if the listing is not trusted
   private func checkRemoteAlbumListing(_ listing: RemoteListing) async throws
-    -> RemoteAlbumCandidates {
+    -> RemoteAlbumCandidates? {
     try await storage.async.performAndGet { asyncCompanion in
       let accountAsync = asyncCompanion.library.getAccount(managedObjectId: self.accountObjectId)
       let check = asyncCompanion.library.checkRemoteAlbumListing(
@@ -605,7 +723,7 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
           type: .info,
           listing.count
         )
-        return RemoteAlbumCandidates()
+        return nil
       }
       // an album the server lists again is song-synced again by the background sync
       for album in check.reappearedAlbums {
