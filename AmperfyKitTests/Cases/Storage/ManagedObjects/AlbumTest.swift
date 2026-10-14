@@ -579,3 +579,343 @@ class AlbumVisibilityTest: XCTestCase {
     XCTAssertEqual(listingSitesShowingAlbum(), Self.allListingSites)
   }
 }
+
+// MARK: - ServerDeletedDownloadsTest
+
+@MainActor
+class ServerDeletedDownloadsTest: XCTestCase {
+  var cdHelper: CoreDataHelper!
+  var library: LibraryStorage!
+  var account: Account!
+  let now = Date(timeIntervalSince1970: 1_000_000)
+
+  override func setUp() async throws {
+    cdHelper = CoreDataHelper()
+    let context = cdHelper.createInMemoryManagedObjectContext()
+    cdHelper.clearContext(context: context)
+    library = LibraryStorage(context: context)
+    account = library.getAccount(info: TestAccountInfo.create1())
+  }
+
+  override func tearDown() {}
+
+  private func createAlbum(id: String, isDeleted: Bool) -> Album {
+    let album = library.createAlbum(account: account)
+    album.id = id
+    album.remoteStatus = isDeleted ? .deleted : .available
+    return album
+  }
+
+  @discardableResult
+  private func createSong(
+    id: String,
+    album: Album? = nil,
+    isCached: Bool = true,
+    isDeleted: Bool = true
+  )
+    -> Song {
+    let song = library.createSong(account: account)
+    song.id = id
+    song.album = album
+    if isCached {
+      song.relFilePath = URL(string: "testSong-\(id)")
+    }
+    song.remoteStatus = isDeleted ? .deleted : .available
+    return song
+  }
+
+  private func ids(_ count: Int) -> Set<String> {
+    Set((0 ..< count).map { "song-\($0)" })
+  }
+
+  private func run(
+    scan: String?,
+    isListingTrusted: Bool = true,
+    isGuardTripped: Bool = false
+  )
+    -> RemoteDeletionRun {
+    RemoteDeletionRun(
+      scans: RemoteDeletionScans(albumListing: scan),
+      isListingTrusted: isListingTrusted,
+      isGuardTripped: isGuardTripped
+    )
+  }
+
+  private func held(
+    _ songIDs: Set<String>,
+    scan: String?,
+    date: Date? = nil
+  )
+    -> [String: ServerDeletedDownloadEvidence] {
+    let evidence = ServerDeletedDownloadEvidence(scan: scan, date: date ?? now)
+    return Dictionary(uniqueKeysWithValues: songIDs.map { ($0, evidence) })
+  }
+
+  private func decide(
+    run: RemoteDeletionRun?,
+    candidateIDs: Set<String>,
+    cachedSongCount: Int = 1000,
+    heldSongs: [String: ServerDeletedDownloadEvidence] = [:],
+    playingSongID: String? = nil,
+    isEnabled: Bool = true,
+    at date: Date? = nil
+  )
+    -> ServerDeletedDownloadsDecision {
+    LibraryStorage.decideServerDeletedDownloads(
+      isEnabled: isEnabled,
+      run: run,
+      candidateIDs: candidateIDs,
+      playingSongID: playingSongID,
+      cachedSongCount: cachedSongCount,
+      heldSongs: heldSongs,
+      now: date ?? now
+    )
+  }
+
+  func testCandidates_AreDownloadedDeletedSongsWithoutAvailableAlbum() {
+    let deletedAlbum = createAlbum(id: "album-deleted", isDeleted: true)
+    let revivedAlbum = createAlbum(id: "album-revived", isDeleted: false)
+    createSong(id: "left-album")
+    createSong(id: "of-deleted-album", album: deletedAlbum)
+    createSong(id: "of-revived-album", album: revivedAlbum)
+    createSong(id: "not-downloaded", isCached: false)
+    createSong(id: "available", isDeleted: false)
+    library.saveContext()
+    let candidateIDs = Set(library.getServerDeletedCachedSongs(for: account).map { $0.id })
+    XCTAssertEqual(candidateIDs, ["left-album", "of-deleted-album"])
+  }
+
+  func testDecision_SettingOffDeletesNothingAndClearsHeldSongs() {
+    let decision = decide(
+      run: run(scan: "scan-2"),
+      candidateIDs: ids(3),
+      heldSongs: held(ids(3), scan: "scan-1"),
+      isEnabled: false
+    )
+    XCTAssertEqual(decision, ServerDeletedDownloadsDecision())
+  }
+
+  func testDecision_ErroredRunDeletesNothingAndKeepsHeldSongs() {
+    let decision = decide(
+      run: nil,
+      candidateIDs: ids(3),
+      heldSongs: held(["song-0"], scan: "scan-1")
+    )
+    XCTAssertTrue(decision.songsToDelete.isEmpty)
+    XCTAssertEqual(decision.heldSongs, held(["song-0"], scan: "scan-1"))
+  }
+
+  func testDecision_UntrustedOrGuardTrippedRunDeletesNothing() {
+    let runs = [
+      run(scan: "scan-2", isListingTrusted: false),
+      run(scan: "scan-2", isListingTrusted: true, isGuardTripped: true),
+      run(scan: "scan-2", isListingTrusted: false, isGuardTripped: true),
+      // the run an Ampache server reports
+      RemoteDeletionRun(scans: RemoteDeletionScans()),
+    ]
+    for untrustedRun in runs {
+      let decision = decide(
+        run: untrustedRun,
+        candidateIDs: ids(3),
+        heldSongs: held(["song-0"], scan: "scan-1")
+      )
+      XCTAssertTrue(decision.songsToDelete.isEmpty)
+      XCTAssertEqual(decision.heldSongs, held(["song-0"], scan: "scan-1"))
+    }
+  }
+
+  func testDecision_UpToTwentyCandidatesAreDeleted() {
+    let decision = decide(run: run(scan: "scan-1"), candidateIDs: ids(20))
+    XCTAssertEqual(decision.songsToDelete, held(ids(20), scan: "scan-1"))
+    XCTAssertTrue(decision.heldSongs.isEmpty)
+  }
+
+  func testDecision_MoreThanTwentyCandidatesAreHeld() {
+    let decision = decide(run: run(scan: "scan-1"), candidateIDs: ids(21))
+    XCTAssertTrue(decision.songsToDelete.isEmpty)
+    XCTAssertEqual(decision.heldSongs, held(ids(21), scan: "scan-1"))
+  }
+
+  func testDecision_MoreThanATenthOfTheDownloadsAreHeld() {
+    let held3 = decide(run: run(scan: "scan-1"), candidateIDs: ids(3), cachedSongCount: 20)
+    XCTAssertTrue(held3.songsToDelete.isEmpty)
+    XCTAssertEqual(Set(held3.heldSongs.keys), ids(3))
+    let deleted2 = decide(run: run(scan: "scan-1"), candidateIDs: ids(2), cachedSongCount: 20)
+    XCTAssertEqual(Set(deleted2.songsToDelete.keys), ids(2))
+    XCTAssertTrue(deleted2.heldSongs.isEmpty)
+  }
+
+  func testDecision_SmallLibraryMayLoseOneDownload() {
+    let one = decide(run: run(scan: "scan-1"), candidateIDs: ids(1), cachedSongCount: 5)
+    XCTAssertEqual(Set(one.songsToDelete.keys), ids(1))
+    let two = decide(run: run(scan: "scan-1"), candidateIDs: ids(2), cachedSongCount: 5)
+    XCTAssertTrue(two.songsToDelete.isEmpty)
+    XCTAssertEqual(Set(two.heldSongs.keys), ids(2))
+  }
+
+  func testDecision_LaterRunWithNewerScanConfirmsHeldSongs() {
+    let decision = decide(
+      run: run(scan: "scan-2"),
+      candidateIDs: ids(25),
+      heldSongs: held(ids(25), scan: "scan-1")
+    )
+    XCTAssertEqual(decision.songsToDelete, held(ids(25), scan: "scan-1"))
+    XCTAssertTrue(decision.heldSongs.isEmpty)
+  }
+
+  func testDecision_RunWithTheSameScanDoesNotConfirm() {
+    let decision = decide(
+      run: run(scan: "scan-1"),
+      candidateIDs: ids(25),
+      heldSongs: held(ids(25), scan: "scan-1")
+    )
+    XCTAssertTrue(decision.songsToDelete.isEmpty)
+    XCTAssertEqual(decision.heldSongs, held(ids(25), scan: "scan-1"))
+  }
+
+  func testDecision_RunWithoutScanInBetweenDoesNotConfirm() {
+    let heldSongs = held(ids(25), scan: "scan-1")
+    let withoutScan = decide(run: run(scan: nil), candidateIDs: ids(25), heldSongs: heldSongs)
+    XCTAssertTrue(withoutScan.songsToDelete.isEmpty)
+    XCTAssertEqual(withoutScan.heldSongs, heldSongs)
+    let sameScanAgain = decide(
+      run: run(scan: "scan-1"),
+      candidateIDs: ids(25),
+      heldSongs: withoutScan.heldSongs
+    )
+    XCTAssertTrue(sameScanAgain.songsToDelete.isEmpty)
+    XCTAssertEqual(sameScanAgain.heldSongs, heldSongs)
+  }
+
+  func testDecision_ServerWithoutScanConfirmsAfterThirtyMinutes() {
+    let heldSongs = held(ids(25), scan: nil)
+    let early = decide(
+      run: run(scan: nil),
+      candidateIDs: ids(25),
+      heldSongs: heldSongs,
+      at: now.addingTimeInterval(29 * 60)
+    )
+    XCTAssertTrue(early.songsToDelete.isEmpty)
+    XCTAssertEqual(early.heldSongs, heldSongs)
+    let later = decide(
+      run: run(scan: nil),
+      candidateIDs: ids(25),
+      heldSongs: heldSongs,
+      at: now.addingTimeInterval(30 * 60)
+    )
+    XCTAssertEqual(later.songsToDelete, heldSongs)
+    XCTAssertTrue(later.heldSongs.isEmpty)
+  }
+
+  func testDecision_HeldSongsWithoutScanWaitForTheNextScan() {
+    let later = now.addingTimeInterval(60)
+    let firstScan = decide(
+      run: run(scan: "scan-1"),
+      candidateIDs: ids(25),
+      heldSongs: held(ids(25), scan: nil),
+      at: later
+    )
+    XCTAssertTrue(firstScan.songsToDelete.isEmpty)
+    XCTAssertEqual(firstScan.heldSongs, held(ids(25), scan: "scan-1", date: later))
+    let nextScan = decide(
+      run: run(scan: "scan-2"),
+      candidateIDs: ids(25),
+      heldSongs: firstScan.heldSongs
+    )
+    XCTAssertEqual(Set(nextScan.songsToDelete.keys), ids(25))
+  }
+
+  func testDecision_HeldSongNoLongerCandidateLeavesTheHeldSongs() {
+    let decision = decide(
+      run: run(scan: "scan-1"),
+      candidateIDs: ids(24),
+      heldSongs: held(ids(25), scan: "scan-1")
+    )
+    XCTAssertEqual(Set(decision.heldSongs.keys), ids(24))
+    XCTAssertTrue(decision.songsToDelete.isEmpty)
+  }
+
+  func testDecision_PlayingSongIsNeitherDeletedNorCounted() {
+    let fresh = decide(
+      run: run(scan: "scan-1"),
+      candidateIDs: ["song-0", "song-1"],
+      cachedSongCount: 10,
+      playingSongID: "song-0"
+    )
+    XCTAssertEqual(Set(fresh.songsToDelete.keys), ["song-1"])
+    XCTAssertTrue(fresh.heldSongs.isEmpty)
+    let confirmed = decide(
+      run: run(scan: "scan-2"),
+      candidateIDs: ["song-0"],
+      heldSongs: held(["song-0"], scan: "scan-1"),
+      playingSongID: "song-0"
+    )
+    XCTAssertTrue(confirmed.songsToDelete.isEmpty)
+    XCTAssertEqual(confirmed.heldSongs, held(["song-0"], scan: "scan-1"))
+  }
+
+  func testDecision_UncheckedSongsAreHeldAgain() {
+    let decision = decide(
+      run: run(scan: "scan-2"),
+      candidateIDs: ["song-0", "song-1", "song-2"],
+      heldSongs: held(["song-0"], scan: "scan-1")
+    )
+    XCTAssertEqual(Set(decision.songsToDelete.keys), ["song-0", "song-1", "song-2"])
+    let heldAgain = decision.heldSongs(addingUnchecked: ["song-0", "song-2"])
+    XCTAssertEqual(heldAgain["song-0"], ServerDeletedDownloadEvidence(scan: "scan-1", date: now))
+    XCTAssertEqual(heldAgain["song-2"], ServerDeletedDownloadEvidence(scan: "scan-2", date: now))
+    XCTAssertNil(heldAgain["song-1"])
+  }
+
+  func testDeleteCache_OnlyOfDecidedCandidates() {
+    let revivedAlbum = createAlbum(id: "album-revived", isDeleted: false)
+    let decided = createSong(id: "decided")
+    let notDecided = createSong(id: "not-decided")
+    let ofRevivedAlbum = createSong(id: "of-revived-album", album: revivedAlbum)
+    let playing = createSong(id: "playing")
+    let duplicate = createSong(id: "duplicate")
+    let availableDuplicate = createSong(id: "duplicate", isDeleted: false)
+    library.saveContext()
+
+    let deletedSongs = library.deleteCacheOfServerDeletedSongs(
+      for: account,
+      songIDs: ["decided", "of-revived-album", "playing", "duplicate"],
+      playingSongID: "playing"
+    )
+    XCTAssertEqual(deletedSongs.map { $0.id }, ["decided"])
+    XCTAssertNil(decided.relFilePath)
+    XCTAssertFalse(decided.isCached)
+    for keptSong in [notDecided, ofRevivedAlbum, playing, duplicate, availableDuplicate] {
+      XCTAssertNotNil(keptSong.relFilePath)
+    }
+  }
+}
+
+// MARK: - UserSettingsDecodingTest
+
+@MainActor
+class UserSettingsDecodingTest: XCTestCase {
+  func testSettingsWithoutDeleteDownloadsKey_DecodeWithTheSettingOff() throws {
+    var settings = UserSettings()
+    settings.isDeleteDownloadsOfServerDeletedSongs = true
+    settings.isShowRating = true
+    let data = try JSONEncoder().encode(settings)
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    // settings written before the key existed
+    XCTAssertNotNil(json.removeValue(forKey: "_isDeleteDownloadsOfServerDeletedSongs"))
+    let decoded = try JSONDecoder().decode(
+      UserSettings.self,
+      from: JSONSerialization.data(withJSONObject: json)
+    )
+    XCTAssertFalse(decoded.isDeleteDownloadsOfServerDeletedSongs)
+    XCTAssertTrue(decoded.isShowRating)
+  }
+
+  func testDeleteDownloadsSetting_IsOffByDefaultAndKeepsItsValue() throws {
+    XCTAssertFalse(UserSettings().isDeleteDownloadsOfServerDeletedSongs)
+    var settings = UserSettings()
+    settings.isDeleteDownloadsOfServerDeletedSongs = true
+    let decoded = try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(settings))
+    XCTAssertTrue(decoded.isDeleteDownloadsOfServerDeletedSongs)
+  }
+}

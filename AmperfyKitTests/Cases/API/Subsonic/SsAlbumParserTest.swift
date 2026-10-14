@@ -416,4 +416,113 @@ class SsRemoteListingParserTest: XCTestCase {
     XCTAssertEqual(scans, RemoteDeletionScans(songListing: "scan-2"))
     XCTAssertEqual(resyncedAlbumIDs, ["a"])
   }
+
+  func testSongAnswer_FoundSongNamesItsAlbum() {
+    let parserDelegate = parse(getTestFileData(name: "song_example_1"))
+    XCTAssertEqual(parserDelegate.songAnswer(songID: "so-7"), .inAlbum("al-5"))
+    XCTAssertEqual(parserDelegate.songAnswer(songID: "so-8"), .unknown)
+  }
+
+  func testSongAnswer_DataNotFoundIsDeleted() {
+    let parserDelegate = parse(getTestFileData(name: "error_not_found_example_1"))
+    XCTAssertEqual(parserDelegate.songAnswer(songID: "so-7"), .deleted)
+  }
+
+  func testSongAnswer_OtherErrorIsUnknown() {
+    let parserDelegate = parse(getTestFileData(name: "error_example_1"))
+    XCTAssertEqual(parserDelegate.songAnswer(songID: "so-7"), .unknown)
+  }
+
+  func testSongAnswer_NonSubsonicOrTruncatedAnswerIsNoAnswer() {
+    let html = parse(Data("<html><body>Bad Gateway</body></html>".utf8))
+    XCTAssertEqual(html.songAnswer(songID: "so-7"), .noAnswer)
+    let data = getTestFileData(name: "song_example_1")
+    XCTAssertEqual(parse(data.prefix(data.count / 2)).songAnswer(songID: "so-7"), .noAnswer)
+  }
+
+  func testAlbumAnswer_ListsTheSongsOfTheRequestedAlbum() {
+    let parserDelegate = parse(getTestFileData(name: "album_example_1"))
+    guard case let .songs(songIDs) = parserDelegate.albumAnswer(albumID: "11053") else {
+      return XCTFail("the album answer must list its songs")
+    }
+    XCTAssertTrue(songIDs.contains("71463"))
+    XCTAssertFalse(songIDs.contains("so-7"))
+  }
+
+  func testAlbumAnswer_AnotherAlbumIsUnknown() {
+    let parserDelegate = parse(getTestFileData(name: "album_example_1"))
+    XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-5"), .unknown)
+  }
+
+  func testAlbumAnswer_AlbumWithoutSongsListsNoSong() {
+    let parserDelegate = parse(getTestFileData(name: "album_missing_example_1"))
+    XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-9"), .songs([]))
+  }
+
+  func testAlbumAnswer_DataNotFoundIsDeleted() {
+    let parserDelegate = parse(getTestFileData(name: "error_not_found_example_1"))
+    XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-5"), .deleted)
+  }
+
+  func testAlbumAnswer_NonSubsonicAnswerIsNoAnswer() {
+    let parserDelegate = parse(Data("<html><body>Bad Gateway</body></html>".utf8))
+    XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-5"), .noAnswer)
+  }
+
+  func testVerifySongDeletions_DeletesOnlyOnAPositiveAnswer() async {
+    var requestedAlbumIDs = [String]()
+    let verification = await SubsonicLibrarySyncer.verifySongDeletions(
+      songIDs: ["purged", "missing", "present", "unknown", "albumUnknown", "albumGone"],
+      requestSong: { songID in
+        switch songID {
+        case "purged": return .deleted
+        case "missing", "present": return .inAlbum("a1")
+        case "albumUnknown": return .inAlbum("a2")
+        case "albumGone": return .inAlbum("a3")
+        default: return .unknown
+        }
+      },
+      requestAlbum: { albumID in
+        requestedAlbumIDs.append(albumID)
+        switch albumID {
+        case "a1": return .songs(["present"])
+        case "a3": return .deleted
+        default: return .unknown
+        }
+      }
+    )
+    XCTAssertEqual(verification.deletedSongIDs, ["purged", "missing", "albumGone"])
+    XCTAssertTrue(verification.uncheckedSongIDs.isEmpty)
+    // every album is requested once
+    XCTAssertEqual(requestedAlbumIDs, ["a1", "a2", "a3"])
+  }
+
+  func testVerifySongDeletions_StopsAtTheFirstMissingAnswer() async {
+    var requestedSongIDs = [String]()
+    let verification = await SubsonicLibrarySyncer.verifySongDeletions(
+      songIDs: ["s1", "s2", "s3", "s4"],
+      requestSong: { songID in
+        requestedSongIDs.append(songID)
+        switch songID {
+        case "s1": return .deleted
+        case "s2": return .inAlbum("a1")
+        default: return .deleted
+        }
+      },
+      requestAlbum: { _ in .noAnswer }
+    )
+    XCTAssertEqual(verification.deletedSongIDs, ["s1"])
+    XCTAssertEqual(verification.uncheckedSongIDs, ["s2", "s3", "s4"])
+    XCTAssertEqual(requestedSongIDs, ["s1", "s2"])
+  }
+
+  func testVerifySongDeletions_TransportErrorOnGetSongDeletesNothingMore() async {
+    let verification = await SubsonicLibrarySyncer.verifySongDeletions(
+      songIDs: ["s1", "s2"],
+      requestSong: { _ in .noAnswer },
+      requestAlbum: { _ in .deleted }
+    )
+    XCTAssertTrue(verification.deletedSongIDs.isEmpty)
+    XCTAssertEqual(verification.uncheckedSongIDs, ["s1", "s2"])
+  }
 }
