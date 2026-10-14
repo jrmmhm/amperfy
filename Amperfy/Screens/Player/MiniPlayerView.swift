@@ -562,6 +562,13 @@ class MiniPlayerView: UIView {
     #endif
 
     player.addNotifier(notifier: self)
+    // the repeat button shows autoplay only while online
+    appDelegate.notificationHandler.register(
+      self,
+      selector: #selector(refreshRepeatButton),
+      name: .offlineModeChanged,
+      object: nil
+    )
 
     registerForTraitChanges(
       [UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self],
@@ -726,6 +733,11 @@ class MiniPlayerView: UIView {
   }
 
   private var playButtonTrailingConstraint: NSLayoutConstraint?
+
+  @objc
+  private func refreshRepeatButton() {
+    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
+  }
 
   @objc
   private func miniPlayerGotTouched(_ recognizer: UITapGestureRecognizer) {

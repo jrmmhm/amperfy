@@ -36,29 +36,17 @@ class ContextQueueNextSectionHeader: UIView {
 
   private var player: PlayerFacade!
   private var rootView: PopupPlayerVC?
-  private var playerHandler: PlayerUIHandler?
 
   @IBOutlet
   weak var queueNameLabel: UILabel!
   @IBOutlet
   weak var contextNameLabel: MarqueeLabel!
 
-  @IBOutlet
-  weak var shuffleButton: UIButton!
-  @IBOutlet
-  weak var repeatButton: UIButton!
-  @IBOutlet
-  weak var autoplayButton: UIButton!
-
-  @IBOutlet
-  weak var autoplayTrailingConstraint: NSLayoutConstraint!
-
   required init?(coder aDecoder: NSCoder) {
     super.init(coder: aDecoder)
     self.layoutMargins = Self.margin
     self.player = appDelegate.player
     player.addNotifier(notifier: self)
-    self.playerHandler = PlayerUIHandler(player: player, style: .popupPlayer)
   }
 
   func prepare(toWorkOnRootView: PopupPlayerVC?) {
@@ -69,68 +57,6 @@ class ContextQueueNextSectionHeader: UIView {
 
   func refresh() {
     contextNameLabel.text = "\(player.contextName)"
-    refreshCurrentlyPlayingInfo()
-    configureAutoplayButtonPosition()
-    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
-    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
-    playerHandler?.refreshAutoplayButton(autoplayButton: autoplayButton)
-  }
-
-  func configureAutoplayButtonPosition() {
-    autoplayTrailingConstraint.isActive = false
-    #if targetEnvironment(macCatalyst)
-      if appDelegate.isShowingMiniPlayer {
-        autoplayTrailingConstraint = autoplayButton.trailingAnchor.constraint(
-          equalTo: shuffleButton.leadingAnchor,
-          constant: -8.0
-        )
-      } else {
-        autoplayTrailingConstraint = autoplayButton.trailingAnchor.constraint(
-          equalTo: safeAreaLayoutGuide.trailingAnchor,
-          constant: -8.0
-        )
-      }
-    #else
-      autoplayTrailingConstraint = autoplayButton.trailingAnchor.constraint(
-        equalTo: shuffleButton.leadingAnchor,
-        constant: -8.0
-      )
-    #endif
-    NSLayoutConstraint.activate([
-      autoplayTrailingConstraint,
-    ])
-  }
-
-  func refreshCurrentlyPlayingInfo() {
-    switch player.playerMode {
-    case .music:
-      repeatButton.isHidden = false
-      shuffleButton.isHidden = false
-      autoplayButton.isHidden = false
-    case .podcast:
-      repeatButton.isHidden = true
-      shuffleButton.isHidden = true
-      autoplayButton.isHidden = true
-    }
-  }
-
-  @IBAction
-  func pressedShuffle(_ sender: Any) {
-    playerHandler?.shuffleButtonPushed()
-    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
-    rootView?.scrollToCurrentlyPlayingRow()
-  }
-
-  @IBAction
-  func pressedRepeat(_ sender: Any) {
-    playerHandler?.repeatButtonPushed()
-    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
-  }
-
-  @IBAction
-  func pressedAutoplay(_ sender: Any) {
-    playerHandler?.autoplayButtonPushed()
-    playerHandler?.refreshAutoplayButton(autoplayButton: autoplayButton)
   }
 }
 
@@ -143,9 +69,7 @@ extension ContextQueueNextSectionHeader: MusicPlayable {
 
   func didPause() {}
 
-  func didStopPlaying() {
-    refreshCurrentlyPlayingInfo()
-  }
+  func didStopPlaying() {}
 
   func didElapsedTimeChange() {}
 
@@ -155,13 +79,9 @@ extension ContextQueueNextSectionHeader: MusicPlayable {
 
   func didArtworkChange() {}
 
-  func didShuffleChange() {
-    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
-  }
+  func didShuffleChange() {}
 
-  func didRepeatChange() {
-    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
-  }
+  func didRepeatChange() {}
 
   func didPlaybackRateChange() {}
 }

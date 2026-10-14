@@ -149,6 +149,67 @@ public enum RepeatMode: Int16, CaseIterable {
   }
 }
 
+// MARK: - EndOfQueueMode
+
+/// The states of the in-app repeat button, cycled in this order: off → repeat all → repeat one →
+/// autoplay → off. Autoplay applies to music while online only.
+public enum EndOfQueueMode: CaseIterable {
+  case off
+  case repeatAll
+  case repeatSingle
+  case autoplay
+}
+
+// MARK: - EndOfQueueSetting
+
+/// The stored values behind the in-app repeat button: the repeat mode is player state,
+/// autoplay a persisted user setting. Both can also be changed elsewhere, so every combination
+/// is valid and a repeat mode wins over autoplay, which only acts when no repeat applies.
+public struct EndOfQueueSetting: Equatable {
+  public var repeatMode: RepeatMode
+  public var isAutoplayEnabled: Bool
+
+  public init(repeatMode: RepeatMode, isAutoplayEnabled: Bool) {
+    self.repeatMode = repeatMode
+    self.isAutoplayEnabled = isAutoplayEnabled
+  }
+
+  public func displayedMode(playerMode: PlayerMode, isOnlineMode: Bool) -> EndOfQueueMode {
+    switch repeatMode {
+    case .all:
+      return .repeatAll
+    case .single:
+      return .repeatSingle
+    case .off:
+      let isAutoplayAvailable = playerMode == .music && isOnlineMode
+      return isAutoplayEnabled && isAutoplayAvailable ? .autoplay : .off
+    }
+  }
+
+  /// The values after a press of the repeat button. No change in podcast mode, where repeat
+  /// does not apply. Offline the autoplay state is skipped and the stored autoplay flag kept.
+  public func next(playerMode: PlayerMode, isOnlineMode: Bool) -> EndOfQueueSetting {
+    guard playerMode == .music else { return self }
+    let nextMode: EndOfQueueMode
+    switch displayedMode(playerMode: playerMode, isOnlineMode: isOnlineMode) {
+    case .off: nextMode = .repeatAll
+    case .repeatAll: nextMode = .repeatSingle
+    case .repeatSingle: nextMode = isOnlineMode ? .autoplay : .off
+    case .autoplay: nextMode = .off
+    }
+    let nextRepeatMode: RepeatMode
+    switch nextMode {
+    case .repeatAll: nextRepeatMode = .all
+    case .repeatSingle: nextRepeatMode = .single
+    case .autoplay, .off: nextRepeatMode = .off
+    }
+    return EndOfQueueSetting(
+      repeatMode: nextRepeatMode,
+      isAutoplayEnabled: isOnlineMode ? nextMode == .autoplay : isAutoplayEnabled
+    )
+  }
+}
+
 // MARK: - PlaybackRate
 
 public enum PlaybackRate: Int, CaseIterable {

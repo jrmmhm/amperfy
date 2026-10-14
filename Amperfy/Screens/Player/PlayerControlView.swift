@@ -167,6 +167,13 @@ class PlayerControlView: UIView {
       optionsButton: optionsButton,
       menuCreateCB: createPlayerOptionsMenu
     )
+    // the repeat button shows autoplay only while online
+    appDelegate.notificationHandler.register(
+      self,
+      selector: #selector(refreshShuffleRepeatButtons),
+      name: .offlineModeChanged,
+      object: nil
+    )
 
     registerForTraitChanges(
       [UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self],
@@ -334,6 +341,7 @@ class PlayerControlView: UIView {
     refreshPlayerModeChangeButton()
   }
 
+  @objc
   func refreshShuffleRepeatButtons() {
     playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
     playerHandler?.refreshRepeatButton(repeatButton: repeatButton)

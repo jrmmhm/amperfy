@@ -82,12 +82,26 @@ class PlayerUIHandler: NSObject {
     player.toggleShuffle()
   }
 
-  func repeatButtonPushed() {
-    player.setRepeatMode(player.repeatMode.nextMode)
+  private var endOfQueueSetting: EndOfQueueSetting {
+    EndOfQueueSetting(
+      repeatMode: player.repeatMode,
+      isAutoplayEnabled: appDelegate.storage.settings.user.isAutoplayEnabled
+    )
   }
 
-  func autoplayButtonPushed() {
-    appDelegate.storage.settings.user.isAutoplayEnabled.toggle()
+  /// Steps through off → repeat all → repeat one → autoplay → off.
+  func repeatButtonPushed() {
+    let current = endOfQueueSetting
+    let next = current.next(
+      playerMode: player.playerMode,
+      isOnlineMode: appDelegate.storage.settings.user.isOnlineMode
+    )
+    guard next != current else { return }
+    if next.isAutoplayEnabled != current.isAutoplayEnabled {
+      appDelegate.storage.settings.user.isAutoplayEnabled = next.isAutoplayEnabled
+    }
+    // also when only autoplay changed: the repeat notification refreshes every repeat button
+    player.setRepeatMode(next.repeatMode)
   }
 
   func refreshPlayButton(_ button: UIButton) {
@@ -184,16 +198,27 @@ class PlayerUIHandler: NSObject {
   }
 
   func refreshRepeatButton(repeatButton: UIButton) {
-    let isSelected = player.repeatMode != .off
+    let mode = endOfQueueSetting.displayedMode(
+      playerMode: player.playerMode,
+      isOnlineMode: appDelegate.storage.settings.user.isOnlineMode
+    )
+    let isSelected = mode != .off
     var image: UIImage?
-    switch player.repeatMode {
+    switch mode {
     case .off:
       image = .repeatMenu
-    case .all:
+      repeatButton.accessibilityValue = "Off"
+    case .repeatAll:
       image = .repeatAll
-    case .single:
+      repeatButton.accessibilityValue = "All"
+    case .repeatSingle:
       image = .repeatOne
+      repeatButton.accessibilityValue = "One"
+    case .autoplay:
+      image = .infinity
+      repeatButton.accessibilityValue = "Autoplay"
     }
+    repeatButton.accessibilityLabel = "Repeat"
 
     switch style {
     case .miniPlayeriOS, .miniPlayerMac:
@@ -210,6 +235,8 @@ class PlayerUIHandler: NSObject {
       repeatButton.configuration = config
       repeatButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
+    // a press does nothing in podcast mode
+    repeatButton.isEnabled = player.playerMode == .music
     repeatButton.isSelected = isSelected
   }
 
@@ -242,25 +269,6 @@ class PlayerUIHandler: NSObject {
     #else
       return false
     #endif
-  }
-
-  func refreshAutoplayButton(autoplayButton: UIButton) {
-    let isActive = appDelegate.storage.settings.user.isAutoplayEnabled
-
-    switch style {
-    case .miniPlayeriOS, .miniPlayerMac:
-      autoplayButton.configuration?.image = .infinity
-        .withConfiguration(UIImage.SymbolConfiguration(scale: .medium))
-      autoplayButton.tintColor = isActive ? .tintColor : .secondaryLabel
-      autoplayButton.backgroundColor = isActive ? .tintColor.withAlphaComponent(0.2) : .clear
-    case .popupPlayer:
-      var config = UIButton.Configuration.player(isSelected: isActive)
-      config.image = .infinity
-        .withConfiguration(UIImage.SymbolConfiguration(scale: .medium))
-      autoplayButton.configuration = config
-    }
-    autoplayButton.isEnabled = player.playerMode == .music
-    autoplayButton.isSelected = isActive
   }
 
   func refreshDisplayPlaylistButton(displayPlaylistButton: UIButton) {
