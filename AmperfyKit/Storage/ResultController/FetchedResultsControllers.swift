@@ -402,7 +402,7 @@ public class GenreAlbumsFetchedResultsController: BasicFetchedResultsController<
     fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
       NSCompoundPredicate(orPredicateWithSubpredicates: [
         AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-        coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: true),
+        coreDataCompanion.library.getFetchPredicateForAlbumsWithCachedAvailableSongs(),
       ]),
       coreDataCompanion.library.getFetchPredicate(forGenre: genre),
     ])
@@ -420,7 +420,7 @@ public class GenreAlbumsFetchedResultsController: BasicFetchedResultsController<
       let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
         NSCompoundPredicate(orPredicateWithSubpredicates: [
           AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-          coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: true),
+          coreDataCompanion.library.getFetchPredicateForAlbumsWithCachedAvailableSongs(),
         ]),
         coreDataCompanion.library.getFetchPredicate(forGenre: genre),
         coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: onlyCached),
@@ -547,7 +547,7 @@ public class ArtistAlbumsItemsFetchedResultsController: BasicFetchedResultsContr
     fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
       NSCompoundPredicate(orPredicateWithSubpredicates: [
         AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-        coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: true),
+        coreDataCompanion.library.getFetchPredicateForAlbumsWithCachedAvailableSongs(),
       ]),
       NSCompoundPredicate(orPredicateWithSubpredicates: [
         coreDataCompanion.library.getFetchPredicate(forArtist: artist),
@@ -568,7 +568,7 @@ public class ArtistAlbumsItemsFetchedResultsController: BasicFetchedResultsContr
       let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
         NSCompoundPredicate(orPredicateWithSubpredicates: [
           AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-          coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: true),
+          coreDataCompanion.library.getFetchPredicateForAlbumsWithCachedAvailableSongs(),
         ]),
         NSCompoundPredicate(orPredicateWithSubpredicates: [
           coreDataCompanion.library.getFetchPredicate(forArtist: artist),
@@ -696,7 +696,7 @@ public class AlbumFetchedResultsController: CachedFetchedResultsController<Album
       coreDataCompanion.library.getFetchPredicate(forAccount: account),
       NSCompoundPredicate(orPredicateWithSubpredicates: [
         AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-        coreDataCompanion.library.getFetchPredicate(onlyCachedAlbums: true),
+        coreDataCompanion.library.getFetchPredicateForAlbumsWithCachedAvailableSongs(),
       ]),
     ])
     fetchRequest.relationshipKeyPathsForPrefetching = AlbumMO.relationshipKeyPathsForPrefetching

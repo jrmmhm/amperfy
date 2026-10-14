@@ -174,6 +174,19 @@ public class Album: AbstractLibraryEntity {
       $0.remoteStatus = .deleted
     }
   }
+
+  /// Marks songs a successful album sync no longer found as deleted and takes them out of the
+  /// album. An album that loses its last song this way is marked deleted as well.
+  func markAsRemoteDeleted(songs removedSongs: [Song]) {
+    guard !removedSongs.isEmpty else { return }
+    removedSongs.forEach {
+      $0.remoteStatus = .deleted
+      managedObject.removeFromSongs($0.managedObject)
+    }
+    if managedObject.songs?.firstObject == nil {
+      remoteStatus = .deleted
+    }
+  }
 }
 
 // MARK: PlayableContainable

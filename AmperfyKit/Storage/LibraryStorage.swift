@@ -1067,6 +1067,15 @@ public class LibraryStorage: PlayableFileCachable {
     }
   }
 
+  /// Albums the server deleted stay listed while they have a downloaded song the server did
+  /// not delete as well
+  func getFetchPredicateForAlbumsWithCachedAvailableSongs() -> NSPredicate {
+    NSPredicate(
+      format: "SUBQUERY(songs, $song, $song.relFilePath != nil AND $song.remoteStatus != %i) .@count > 0",
+      RemoteStatus.deleted.rawValue
+    )
+  }
+
   func getFetchPredicate(forSongsOfArtistWithCommonAlbum artist: Artist) -> NSPredicate {
     NSPredicate(format: "%K == %@", #keyPath(SongMO.album.artist), artist.managedObject.objectID)
   }
@@ -1430,7 +1439,7 @@ public class LibraryStorage: PlayableFileCachable {
         getFetchPredicate(forAccount: account),
         NSCompoundPredicate(orPredicateWithSubpredicates: [
           AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-          getFetchPredicate(onlyCachedAlbums: true),
+          getFetchPredicateForAlbumsWithCachedAvailableSongs(),
         ]),
       ])
     }
@@ -2326,7 +2335,7 @@ public class LibraryStorage: PlayableFileCachable {
       getFetchPredicate(forAccount: account),
       NSCompoundPredicate(orPredicateWithSubpredicates: [
         AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
-        getFetchPredicate(onlyCachedAlbums: true),
+        getFetchPredicateForAlbumsWithCachedAvailableSongs(),
       ]),
       AlbumMO.getIdentifierBasedSearchPredicate(searchText: searchText),
       getFetchPredicate(onlyCachedAlbums: onlyCached),

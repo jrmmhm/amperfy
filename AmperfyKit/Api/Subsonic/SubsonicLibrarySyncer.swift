@@ -429,12 +429,11 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         library: asyncCompanion.library
       )
       try self.parse(response: albumResponse, delegate: parserDelegate)
-      let removedSongs = oldSongs.subtracting(parserDelegate.parsedSongs)
-      removedSongs.lazy.compactMap { $0.asSong }.forEach {
+      let removedSongs = oldSongs.subtracting(parserDelegate.parsedSongs).compactMap { $0.asSong }
+      removedSongs.forEach {
         os_log("Song <%s> is remote deleted", log: self.log, type: .info, $0.displayString)
-        $0.remoteStatus = .deleted
-        albumAsync.managedObject.removeFromSongs($0.managedObject)
       }
+      albumAsync.markAsRemoteDeleted(songs: removedSongs)
       albumAsync.isCached = parserDelegate.isCollectionCached
       albumAsync.isSongsMetaDataSynced = true
     }
