@@ -308,6 +308,23 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertEqual(check.reappearedAlbums.map { $0.id }, ["album-0"])
   }
 
+  func testDeletedAlbumListedWithoutSongs_HasNotReappeared() {
+    let albums = createAlbums(count: 5)
+    albums[0].remoteStatus = .deleted
+    albums[1].remoteStatus = .deleted
+    albums[2].remoteStatus = .deleted
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: [
+        "album-0": 0, // the server lists the emptied album
+        "album-1": 3,
+        // album-2 without a song count
+      ])
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(Set(check.reappearedAlbums.map { $0.id }), ["album-1", "album-2"])
+  }
+
   func testSongCountMismatch_OnlyMoreLocalSongsOfSyncedAlbums() {
     let albums = createAlbums(count: 5)
     albums.forEach {
