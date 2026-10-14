@@ -202,6 +202,9 @@ class SsRemoteListingParserDelegate: SsXmlParser {
       }
     case "song":
       songElementCount += 1
+      guard let id = attributeDict["id"] else { return }
+      page.entryCount += 1
+      page.listing.songIDs.insert(id)
     case "scanStatus":
       serverScan = RemoteServerScan(
         lastScan: attributeDict["lastScan"],

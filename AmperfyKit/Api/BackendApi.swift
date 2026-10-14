@@ -150,9 +150,11 @@ public struct RemoteServerScan: Sendable {
 /// The server library scans the remote deletion check has already been run against
 public struct RemoteDeletionScans: Sendable, Equatable {
   public var albumListing: String?
+  public var songListing: String?
 
-  public init(albumListing: String? = nil) {
+  public init(albumListing: String? = nil, songListing: String? = nil) {
     self.albumListing = albumListing
+    self.songListing = songListing
   }
 
   /// Nothing can be deleted on the server without a library scan. A server that reports no
@@ -161,6 +163,14 @@ public struct RemoteDeletionScans: Sendable, Equatable {
     guard !serverScan.isScanning else { return false }
     guard let lastScan = serverScan.lastScan else { return true }
     return lastScan != albumListing
+  }
+
+  /// The song listing pages the whole library, so it runs only for a server that reports its
+  /// library scans (Navidrome keeps the song count of an album when one of its songs is deleted)
+  func isSongListingNeeded(serverScan: RemoteServerScan, isSongListingAllowed: Bool) -> Bool {
+    guard isSongListingAllowed, !serverScan.isScanning,
+          let lastScan = serverScan.lastScan else { return false }
+    return lastScan != songListing
   }
 }
 
@@ -187,7 +197,10 @@ public protocol LibrarySyncer: Sendable {
   func syncNewestPodcastEpisodes() async throws
   /// Detects albums and songs the server deleted and marks them; returns the scans checked
   @MainActor
-  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+  func syncRemoteDeletions(
+    checkedScans: RemoteDeletionScans,
+    isSongListingAllowed: Bool
+  ) async throws
     -> RemoteDeletionScans
   @MainActor
   func syncFavoriteLibraryElements() async throws

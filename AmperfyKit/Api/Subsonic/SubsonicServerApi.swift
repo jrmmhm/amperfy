@@ -661,6 +661,19 @@ final class SubsonicServerApi: URLCleanser, Sendable {
     }
   }
 
+  /// OpenSubsonic servers must answer the empty search3 query `query=""` with all songs
+  public func requestSongListing(offset: Int, count: Int) async throws -> APIDataResponse {
+    try await request { version in
+      var urlComp = try self.createAuthApiUrlComponent(version: version, forAction: "search3")
+      urlComp.addQueryItem(name: "query", value: "\"\"")
+      urlComp.addQueryItem(name: "artistCount", value: 0)
+      urlComp.addQueryItem(name: "albumCount", value: 0)
+      urlComp.addQueryItem(name: "songCount", value: count)
+      urlComp.addQueryItem(name: "songOffset", value: offset)
+      return try self.createUrl(from: urlComp)
+    }
+  }
+
   public func requestRandomSongs(count: Int) async throws -> APIDataResponse {
     try await request { version in
       var urlComp = try self.createAuthApiUrlComponent(

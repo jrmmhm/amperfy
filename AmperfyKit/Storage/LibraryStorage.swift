@@ -54,13 +54,15 @@ struct RemoteListing: Sendable {
   var albumIDs = Set<String>()
   /// song count the server reports per album id
   var albumSongCounts = [String: Int]()
+  var songIDs = Set<String>()
 
-  var count: Int { albumIDs.count }
-  var isEmpty: Bool { albumIDs.isEmpty }
+  var count: Int { albumIDs.count + songIDs.count }
+  var isEmpty: Bool { albumIDs.isEmpty && songIDs.isEmpty }
 
   mutating func merge(_ other: RemoteListing) {
     albumIDs.formUnion(other.albumIDs)
     albumSongCounts.merge(other.albumSongCounts) { $1 }
+    songIDs.formUnion(other.songIDs)
   }
 }
 
@@ -1543,6 +1545,48 @@ public class LibraryStorage: PlayableFileCachable {
       reappearedAlbums: albums
         .filter { $0.remoteStatus == .deleted && listing.albumIDs.contains($0.id) }
     )
+  }
+
+  /// Song-synced available albums with an available song the song listing does not contain.
+  /// Returns nil if the listing is empty (a server without the empty search3 query) or names
+  /// too many albums to be trusted.
+  func getAlbumsWithSongsMissing(for account: Account, fromListing listing: RemoteListing)
+    -> [Album]? {
+    guard !listing.songIDs.isEmpty else { return nil }
+    let syncedAlbumsPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+      getFetchPredicate(forAccount: account),
+      AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
+      NSPredicate(format: "%K == TRUE", #keyPath(AlbumMO.isSongsMetaDataSynced)),
+    ])
+    let albumsRequest: NSFetchRequest<AlbumMO> = AlbumMO.fetchRequest()
+    albumsRequest.predicate = syncedAlbumsPredicate
+    let syncedAlbumCount = (try? context.count(for: albumsRequest)) ?? 0
+
+    let songsRequest: NSFetchRequest<SongMO> = SongMO.fetchRequest()
+    songsRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+      getFetchPredicate(forAccount: account),
+      AbstractLibraryEntityMO.excludeRemoteDeleteFetchPredicate,
+      NSPredicate(
+        format: "%K == %i",
+        #keyPath(SongMO.album.remoteStatus),
+        RemoteStatus.available.rawValue
+      ),
+      NSPredicate(format: "%K == TRUE", #keyPath(SongMO.album.isSongsMetaDataSynced)),
+    ])
+    let albums = ((try? context.fetch(songsRequest)) ?? [])
+      .map { Song(managedObject: $0) }
+      .filter { !$0.id.isEmpty && !listing.songIDs.contains($0.id) }
+      .compactMap { $0.album }
+      .filter { !$0.id.isEmpty }
+    let albumsWithMissingSongs = Dictionary(
+      albums.map { ($0.id, $0) },
+      uniquingKeysWith: { album, _ in album }
+    ).values.sorted { $0.id < $1.id }
+    guard Self.isRemoteDeletionPlausible(
+      candidateCount: albumsWithMissingSongs.count,
+      localCount: syncedAlbumCount
+    ) else { return nil }
+    return albumsWithMissingSongs
   }
 
   // MARK: Podcasts

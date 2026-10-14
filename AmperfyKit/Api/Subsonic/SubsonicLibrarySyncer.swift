@@ -489,12 +489,39 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
     return scans
   }
 
+  /// Checks the song listing once per server library scan, like the album listing. Albums
+  /// with a song the listing lacks are synced again, which marks the song deleted.
+  static func checkSongListing(
+    checkedScans: RemoteDeletionScans,
+    serverScan: RemoteServerScan,
+    isSongListingAllowed: Bool,
+    requestPage: (_ offset: Int) async throws -> RemoteListingPage,
+    checkListing: (_ listing: RemoteListing) async throws -> [String],
+    resync: (_ albumID: String) async -> ()
+  ) async throws
+    -> RemoteDeletionScans {
+    guard checkedScans.isSongListingNeeded(
+      serverScan: serverScan,
+      isSongListingAllowed: isSongListingAllowed
+    ) else { return checkedScans }
+    let listing = try await collectListing(requestPage: requestPage)
+    for albumID in try await checkListing(listing) {
+      await resync(albumID)
+    }
+    var scans = checkedScans
+    scans.songListing = serverScan.lastScan
+    return scans
+  }
+
   @MainActor
-  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+  func syncRemoteDeletions(
+    checkedScans: RemoteDeletionScans,
+    isSongListingAllowed: Bool
+  ) async throws
     -> RemoteDeletionScans {
     guard isSyncAllowed else { return checkedScans }
     let serverScan = await requestServerScan()
-    return try await Self.checkAlbumListing(
+    let scans = try await Self.checkAlbumListing(
       checkedScans: checkedScans,
       serverScan: serverScan,
       requestPage: { offset in
@@ -508,6 +535,39 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
       verifyDeletion: { albumID in await self.verifyRemoteDeletion(ofAlbumWithID: albumID) },
       resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
     )
+    return try await Self.checkSongListing(
+      checkedScans: scans,
+      serverScan: serverScan,
+      isSongListingAllowed: isSongListingAllowed,
+      requestPage: { offset in
+        let response = try await self.subsonicServerApi.requestSongListing(
+          offset: offset,
+          count: Self.maxItemCountToPollAtOnce
+        )
+        return try self.parseListingPage(response: response)
+      },
+      checkListing: { listing in try await self.checkRemoteSongListing(listing) },
+      resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
+    )
+  }
+
+  private func checkRemoteSongListing(_ listing: RemoteListing) async throws -> [String] {
+    try await storage.async.performAndGet { asyncCompanion in
+      let accountAsync = asyncCompanion.library.getAccount(managedObjectId: self.accountObjectId)
+      guard let albums = asyncCompanion.library.getAlbumsWithSongsMissing(
+        for: accountAsync,
+        fromListing: listing
+      ) else {
+        os_log(
+          "Song listing with %i songs is not trusted, nothing is marked",
+          log: self.log,
+          type: .info,
+          listing.songIDs.count
+        )
+        return [String]()
+      }
+      return albums.map { $0.id }
+    }
   }
 
   private func requestServerScan() async -> RemoteServerScan {

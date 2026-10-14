@@ -531,7 +531,10 @@ class AmpacheLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
   }
 
   @MainActor
-  func syncRemoteDeletions(checkedScans: RemoteDeletionScans) async throws
+  func syncRemoteDeletions(
+    checkedScans: RemoteDeletionScans,
+    isSongListingAllowed: Bool
+  ) async throws
     -> RemoteDeletionScans {
     // Ampache detects server deletions when an album or an artist is synced
     checkedScans

@@ -295,16 +295,18 @@ public class MetaManager {
     let scrobbler = createScrobbleSyncer(player: player)
     player.addNotifier(notifier: scrobbler)
     scrobbler.start()
-    Task { await self.syncRemoteDeletions() }
+    Task { await self.syncRemoteDeletions(isAppStart: true) }
   }
 
   private static let remoteDeletionSyncMinInterval: TimeInterval = 60
+  private static let songListingMinInterval: TimeInterval = 30 * 60
   private var isRemoteDeletionSyncRunning = false
   private var remoteDeletionSyncDate: Date?
+  private var songListingDate: Date?
   private var remoteDeletionScans = RemoteDeletionScans()
 
   /// Detects albums and songs deleted on the server (app start and pull-to-refresh)
-  public func syncRemoteDeletions() async {
+  public func syncRemoteDeletions(isAppStart: Bool = false) async {
     guard settings.user.isOnlineMode, !isRemoteDeletionSyncRunning else { return }
     if let remoteDeletionSyncDate,
        Date().timeIntervalSince(remoteDeletionSyncDate) < Self.remoteDeletionSyncMinInterval {
@@ -312,10 +314,26 @@ public class MetaManager {
     }
     isRemoteDeletionSyncRunning = true
     remoteDeletionSyncDate = Date()
+    // the song listing pages the whole library: never at app start, only on Wi-Fi or
+    // Ethernet and at most every 30 minutes
+    var isSongListingAllowed = !isAppStart && networkMonitor.isWifiOrEthernet
+    if let songListingDate,
+       Date().timeIntervalSince(songListingDate) < Self.songListingMinInterval {
+      isSongListingAllowed = false
+    }
     do {
-      remoteDeletionScans = try await librarySyncer
-        .syncRemoteDeletions(checkedScans: remoteDeletionScans)
+      let scans = try await librarySyncer.syncRemoteDeletions(
+        checkedScans: remoteDeletionScans,
+        isSongListingAllowed: isSongListingAllowed
+      )
+      if scans.songListing != remoteDeletionScans.songListing {
+        songListingDate = Date()
+      }
+      remoteDeletionScans = scans
     } catch {
+      if isSongListingAllowed {
+        songListingDate = Date()
+      }
       eventLogger.report(topic: "Remote Deletion Sync", error: error, displayPopup: false)
     }
     isRemoteDeletionSyncRunning = false
