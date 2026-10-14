@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1">
+   <albumList2>
+      <album id="al-1" name="First Light" songCount="12" duration="2950" artist="Test Artist" artistId="ar-1" created="2024-01-01T10:00:00Z"/>
+      <album id="al-2" name="Second Wind" songCount="1" duration="240" artist="Test Artist" artistId="ar-1" created="2024-01-02T10:00:00Z"/>
+      <album id="al-3" name="Third Time" duration="1800" artist="Other Artist" artistId="ar-2" created="2024-01-03T10:00:00Z"/>
+   </albumList2>
+</subsonic-response>

@@ -219,6 +219,10 @@
 		50BE5D5E2850F4F600156FC6 /* indexes_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50AB92D52666C2C700DCE45C /* indexes_example_1.xml */; };
 		50BE5D5F2850F4F600156FC6 /* playlist_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50AB92CD2666BC0B00DCE45C /* playlist_example_1.xml */; };
 		50BE5D602850F4F600156FC6 /* error_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50DB11AE266537910033BFFA /* error_example_1.xml */; };
+		42F90F806645CC5B330B4EA7 /* albumList2_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = FA88F9F76325BA378983850F /* albumList2_example_1.xml */; };
+		B1B575459AAAF8E488C5A418 /* album_missing_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = FA67FE1BFF0BA2451C2D4EBF /* album_missing_example_1.xml */; };
+		40E9E5517AF9F1F2ABCE965E /* error_not_found_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = A2A5EC4BFD3C5C06BC5EC9A1 /* error_not_found_example_1.xml */; };
+		1A220246D333831E59E7F360 /* scanStatus_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = B05EB838CA4ABCB7E7D25AF1 /* scanStatus_example_1.xml */; };
 		50BE5D612850F4F600156FC6 /* playlists_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50AB92CB2666BAED00DCE45C /* playlists_example_1.xml */; };
 		50BE5D622850F4F600156FC6 /* directory_example_1.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50AB92D92666C52600DCE45C /* directory_example_1.xml */; };
 		50BE5D632850F4F600156FC6 /* album_example_2.xml in Resources */ = {isa = PBXBuildFile; fileRef = 50AB92C726662DAC00DCE45C /* album_example_2.xml */; };
@@ -1069,6 +1073,10 @@
 		50DB11A9266536290033BFFA /* SsXmlParserTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SsXmlParserTest.swift; sourceTree = "<group>"; };
 		50DB11AB266536540033BFFA /* ping_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = ping_example_1.xml; sourceTree = "<group>"; };
 		50DB11AE266537910033BFFA /* error_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = error_example_1.xml; sourceTree = "<group>"; };
+		FA88F9F76325BA378983850F /* albumList2_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = albumList2_example_1.xml; sourceTree = "<group>"; };
+		FA67FE1BFF0BA2451C2D4EBF /* album_missing_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = album_missing_example_1.xml; sourceTree = "<group>"; };
+		A2A5EC4BFD3C5C06BC5EC9A1 /* error_not_found_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = error_not_found_example_1.xml; sourceTree = "<group>"; };
+		B05EB838CA4ABCB7E7D25AF1 /* scanStatus_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = scanStatus_example_1.xml; sourceTree = "<group>"; };
 		50DB11B0266537C30033BFFA /* SsPingParserTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SsPingParserTest.swift; sourceTree = "<group>"; };
 		50DB11B226653A670033BFFA /* genres_example_1.xml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = genres_example_1.xml; sourceTree = "<group>"; };
 		50DB11B626653B3A0033BFFA /* SsGenreParserTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SsGenreParserTest.swift; sourceTree = "<group>"; };
@@ -2047,6 +2055,10 @@
 			children = (
 				50DB11AB266536540033BFFA /* ping_example_1.xml */,
 				50DB11AE266537910033BFFA /* error_example_1.xml */,
+				FA88F9F76325BA378983850F /* albumList2_example_1.xml */,
+				FA67FE1BFF0BA2451C2D4EBF /* album_missing_example_1.xml */,
+				A2A5EC4BFD3C5C06BC5EC9A1 /* error_not_found_example_1.xml */,
+				B05EB838CA4ABCB7E7D25AF1 /* scanStatus_example_1.xml */,
 				50DB11B226653A670033BFFA /* genres_example_1.xml */,
 				50AB92BB26660FD800DCE45C /* artists_example_1.xml */,
 				50AB92C526661F5800DCE45C /* artist_example_1.xml */,
@@ -2406,6 +2418,10 @@
 				50AE79B22C1F64E40085CBB3 /* getLyricsBySongId_example_1.xml in Resources */,
 				50BE5D5F2850F4F600156FC6 /* playlist_example_1.xml in Resources */,
 				50BE5D602850F4F600156FC6 /* error_example_1.xml in Resources */,
+				42F90F806645CC5B330B4EA7 /* albumList2_example_1.xml in Resources */,
+				B1B575459AAAF8E488C5A418 /* album_missing_example_1.xml in Resources */,
+				40E9E5517AF9F1F2ABCE965E /* error_not_found_example_1.xml in Resources */,
+				1A220246D333831E59E7F360 /* scanStatus_example_1.xml in Resources */,
 				50BE5D5D2850F4F600156FC6 /* ping_example_1.xml in Resources */,
 				50CEC63A2D1EDB0000D0E696 /* internetRadioStations_example_1.xml in Resources */,
 				50F3A1C4308A1B8A00A1B2C3 /* similarSongs2_example_1.xml in Resources */,

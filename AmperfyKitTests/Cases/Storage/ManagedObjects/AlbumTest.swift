@@ -22,6 +22,8 @@
 @testable import AmperfyKit
 import XCTest
 
+// MARK: - AlbumTest
+
 @MainActor
 class AlbumTest: XCTestCase {
   var cdHelper: CoreDataHelper!
@@ -174,5 +176,180 @@ class AlbumTest: XCTestCase {
     XCTAssertTrue(testAlbum.isOrphaned)
     testAlbum.name = "blub"
     XCTAssertFalse(testAlbum.isOrphaned)
+  }
+}
+
+// MARK: - RemoteAlbumListingCheckTest
+
+@MainActor
+class RemoteAlbumListingCheckTest: XCTestCase {
+  var cdHelper: CoreDataHelper!
+  var library: LibraryStorage!
+  var account: Account!
+
+  override func setUp() async throws {
+    cdHelper = CoreDataHelper()
+    let context = cdHelper.createInMemoryManagedObjectContext()
+    cdHelper.clearContext(context: context)
+    library = LibraryStorage(context: context)
+    account = library.getAccount(info: TestAccountInfo.create1())
+  }
+
+  override func tearDown() {}
+
+  private func createAlbums(count: Int) -> [Album] {
+    (0 ..< count).map { index in
+      let album = library.createAlbum(account: account)
+      album.id = "album-\(index)"
+      return album
+    }
+  }
+
+  private func addSongs(count: Int, to album: Album) {
+    for index in 0 ..< count {
+      let song = library.createSong(account: account)
+      song.id = "\(album.id)-song-\(index)"
+      song.album = album
+    }
+  }
+
+  private func listing(of albums: [Album], songCounts: [String: Int] = [:]) -> RemoteListing {
+    RemoteListing(albumIDs: Set(albums.map { $0.id }), albumSongCounts: songCounts)
+  }
+
+  func testEmptyListing_IsNotTrusted() {
+    _ = createAlbums(count: 5)
+    let check = library.checkRemoteAlbumListing(for: account, listing: RemoteListing())
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+  }
+
+  func testSmallLibrary_OneAbsentAlbumIsCandidate() {
+    let albums = createAlbums(count: 5)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(4)))
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.absentAlbums.map { $0.id }, ["album-4"])
+  }
+
+  func testSmallLibrary_TwoAbsentAlbumsAreNotTrusted() {
+    let albums = createAlbums(count: 5)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(3)))
+    )
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+  }
+
+  func testTenthOfLibraryAbsent_IsTrusted() {
+    let albums = createAlbums(count: 30)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(27)))
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.absentAlbums.count, 3)
+  }
+
+  func testMoreThanTenthOfLibraryAbsent_IsNotTrusted() {
+    let albums = createAlbums(count: 30)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(26)))
+    )
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+  }
+
+  func testTwentyAbsentAlbums_AreTrusted() {
+    let albums = createAlbums(count: 300)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(280)))
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.absentAlbums.count, 20)
+  }
+
+  func testMoreThanTwentyAbsentAlbums_AreNotTrusted() {
+    let albums = createAlbums(count: 300)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(279)))
+    )
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+  }
+
+  func testDeletedAlbumsAndAlbumsWithoutIdAreNoCandidates() {
+    let albums = createAlbums(count: 5)
+    albums[4].remoteStatus = .deleted
+    let albumWithoutId = library.createAlbum(account: account)
+    XCTAssertEqual(albumWithoutId.id, "")
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(4)))
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+    XCTAssertTrue(check.reappearedAlbums.isEmpty)
+  }
+
+  func testDeletedAlbumInListing_HasReappeared() {
+    let albums = createAlbums(count: 5)
+    albums[0].remoteStatus = .deleted
+    let check = library.checkRemoteAlbumListing(for: account, listing: listing(of: albums))
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+    XCTAssertEqual(check.reappearedAlbums.map { $0.id }, ["album-0"])
+  }
+
+  func testSongCountMismatch_OnlyMoreLocalSongsOfSyncedAlbums() {
+    let albums = createAlbums(count: 5)
+    albums.forEach {
+      addSongs(count: 2, to: $0)
+      $0.isSongsMetaDataSynced = true
+    }
+    albums[2].isSongsMetaDataSynced = false
+    library.saveContext()
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: [
+        "album-0": 1, // a song was removed on the server
+        "album-1": 3, // the server counts more songs (Navidrome keeps missing files)
+        "album-2": 1, // songs never synced
+        "album-3": 2, // unchanged
+        // album-4 without a song count
+      ])
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.albumsWithRemovedSongs.map { $0.id }, ["album-0"])
+  }
+
+  func testSongCountMismatch_IsCapped() {
+    let albums = createAlbums(count: 25)
+    var songCounts = [String: Int]()
+    albums.forEach {
+      addSongs(count: 1, to: $0)
+      $0.isSongsMetaDataSynced = true
+      songCounts[$0.id] = 0
+    }
+    library.saveContext()
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: songCounts)
+    )
+    XCTAssertEqual(check.albumsWithRemovedSongs.count, LibraryStorage.maxRemoteDeletionCandidates)
+  }
+
+  func testRemoteDeletionPlausibility() {
+    XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 1, localCount: 1))
+    XCTAssertFalse(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 2, localCount: 19))
+    XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 2, localCount: 20))
+    XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 20, localCount: 1000))
+    XCTAssertFalse(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 21, localCount: 1000))
   }
 }

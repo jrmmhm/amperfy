@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1">
+   <album id="al-9" name="Gone Album" songCount="10" duration="2000" artist="Test Artist" artistId="ar-1" created="2024-01-09T10:00:00Z">
+   </album>
+</subsonic-response>

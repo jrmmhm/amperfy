@@ -22,6 +22,8 @@
 @testable import AmperfyKit
 import XCTest
 
+// MARK: - SsAlbumParserTest
+
 class SsAlbumParserTest: AbstractSsParserTest {
   override func setUp() async throws {
     try await super.setUp()
@@ -134,5 +136,194 @@ class SsAlbumParserTest: AbstractSsParserTest {
     XCTAssertEqual(album.artwork?.account?.userHash, TestAccountInfo.test1UserHash)
     XCTAssertEqual(album.artwork?.type, "")
     XCTAssertEqual(album.artwork?.id, "al-11061")
+  }
+}
+
+// MARK: - SsRemoteListingParserTest
+
+@MainActor
+class SsRemoteListingParserTest: XCTestCase {
+  private func parse(_ data: Data) -> SsRemoteListingParserDelegate {
+    let parserDelegate = SsRemoteListingParserDelegate(
+      performanceMonitor: MOCK_PerformanceMonitor()
+    )
+    parserDelegate.parse(data: data)
+    return parserDelegate
+  }
+
+  private func page(_ albumIDs: [String]) -> RemoteListingPage {
+    var page = RemoteListingPage()
+    page.entryCount = albumIDs.count
+    page.listing.albumIDs = Set(albumIDs)
+    return page
+  }
+
+  func testAlbumListingPage() {
+    let parserDelegate = parse(getTestFileData(name: "albumList2_example_1"))
+    XCTAssertTrue(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.page.entryCount, 3)
+    XCTAssertEqual(parserDelegate.page.listing.albumIDs, ["al-1", "al-2", "al-3"])
+    // al-3 comes without a song count
+    XCTAssertEqual(parserDelegate.page.listing.albumSongCounts, ["al-1": 12, "al-2": 1])
+  }
+
+  func testScanStatus() {
+    let parserDelegate = parse(getTestFileData(name: "scanStatus_example_1"))
+    XCTAssertTrue(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.serverScan.lastScan, "2026-01-14T08:15:00Z")
+    XCTAssertFalse(parserDelegate.serverScan.isScanning)
+    XCTAssertEqual(parserDelegate.page.entryCount, 0)
+  }
+
+  func testErrorAnswerIsNoValidPage() {
+    XCTAssertFalse(parse(getTestFileData(name: "error_example_1")).isValidPage)
+    XCTAssertFalse(parse(getTestFileData(name: "error_not_found_example_1")).isValidPage)
+  }
+
+  func testTruncatedAnswerIsNoValidPage() {
+    let data = getTestFileData(name: "albumList2_example_1")
+    let parserDelegate = parse(data.prefix(data.count / 2))
+    XCTAssertFalse(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.albumVerdict, .unknown)
+  }
+
+  func testNonSubsonicAnswerIsNoValidPage() {
+    let parserDelegate = parse(Data("<html><body>Bad Gateway</body></html>".utf8))
+    XCTAssertFalse(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.albumVerdict, .unknown)
+  }
+
+  func testAlbumVerdict_AlbumWithoutSongsIsDeleted() {
+    XCTAssertEqual(parse(getTestFileData(name: "album_missing_example_1")).albumVerdict, .deleted)
+  }
+
+  func testAlbumVerdict_DataNotFoundIsDeleted() {
+    XCTAssertEqual(
+      parse(getTestFileData(name: "error_not_found_example_1")).albumVerdict,
+      .deleted
+    )
+  }
+
+  func testAlbumVerdict_AlbumWithSongsIsAvailable() {
+    XCTAssertEqual(parse(getTestFileData(name: "album_example_1")).albumVerdict, .available)
+  }
+
+  func testAlbumVerdict_OtherErrorIsUnknown() {
+    XCTAssertEqual(parse(getTestFileData(name: "error_example_1")).albumVerdict, .unknown)
+  }
+
+  func testCollectListing_PagesUntilEmptyPage() async throws {
+    var offsets = [Int]()
+    // the server returns at most two entries per page
+    let pages = [0: page(["a", "b"]), 2: page(["c", "d"]), 4: page(["e"])]
+    let listing = try await SubsonicLibrarySyncer.collectListing { offset in
+      offsets.append(offset)
+      return pages[offset] ?? RemoteListingPage()
+    }
+    XCTAssertEqual(offsets, [0, 2, 4, 5])
+    XCTAssertEqual(listing.albumIDs, ["a", "b", "c", "d", "e"])
+  }
+
+  func testCollectListing_EmptyFirstPageGivesEmptyListing() async throws {
+    let listing = try await SubsonicLibrarySyncer.collectListing { _ in RemoteListingPage() }
+    XCTAssertTrue(listing.isEmpty)
+  }
+
+  func testCollectListing_FailingSecondPageThrows() async {
+    do {
+      _ = try await SubsonicLibrarySyncer.collectListing { offset in
+        guard offset == 0 else { throw BackendError.notSupported }
+        return self.page(["a", "b"])
+      }
+      XCTFail("a failing page must not give a listing")
+    } catch {}
+  }
+
+  func testCollectListing_ServerIgnoringOffsetThrows() async {
+    do {
+      _ = try await SubsonicLibrarySyncer.collectListing { _ in self.page(["a", "b"]) }
+      XCTFail("a repeated page must not give a listing")
+    } catch {}
+  }
+
+  func testAlbumListingNeeded() {
+    let scans = RemoteDeletionScans(albumListing: "scan-1")
+    XCTAssertTrue(scans.isAlbumListingNeeded(serverScan: RemoteServerScan()))
+    XCTAssertFalse(scans.isAlbumListingNeeded(serverScan: RemoteServerScan(lastScan: "scan-1")))
+    XCTAssertTrue(scans.isAlbumListingNeeded(serverScan: RemoteServerScan(lastScan: "scan-2")))
+    XCTAssertFalse(scans.isAlbumListingNeeded(
+      serverScan: RemoteServerScan(lastScan: "scan-2", isScanning: true)
+    ))
+  }
+
+  func testCheckAlbumListing_WithoutNewScanRequestsNothing() async throws {
+    var requestedOffsets = [Int]()
+    let scans = try await SubsonicLibrarySyncer.checkAlbumListing(
+      checkedScans: RemoteDeletionScans(albumListing: "scan-1"),
+      serverScan: RemoteServerScan(lastScan: "scan-1"),
+      requestPage: { offset in
+        requestedOffsets.append(offset)
+        return RemoteListingPage()
+      },
+      checkListing: { _ in RemoteAlbumCandidates() },
+      verifyDeletion: { _ in },
+      resync: { _ in }
+    )
+    XCTAssertEqual(scans, RemoteDeletionScans(albumListing: "scan-1"))
+    XCTAssertTrue(requestedOffsets.isEmpty)
+  }
+
+  func testCheckAlbumListing_FailingPageMarksNothingAndKeepsScan() async {
+    var verifiedAlbumIDs = [String]()
+    do {
+      _ = try await SubsonicLibrarySyncer.checkAlbumListing(
+        checkedScans: RemoteDeletionScans(albumListing: "scan-1"),
+        serverScan: RemoteServerScan(lastScan: "scan-2"),
+        requestPage: { offset in
+          guard offset == 0 else { throw BackendError.notSupported }
+          return self.page(["a", "b"])
+        },
+        checkListing: { _ in RemoteAlbumCandidates(absentAlbumIDs: ["c"]) },
+        verifyDeletion: { verifiedAlbumIDs.append($0) },
+        resync: { _ in }
+      )
+      XCTFail("a failing page must abort the check")
+    } catch {}
+    XCTAssertTrue(verifiedAlbumIDs.isEmpty)
+  }
+
+  func testCheckAlbumListing_UntrustedListingMarksNothingButAdvancesScan() async throws {
+    var verifiedAlbumIDs = [String]()
+    var resyncedAlbumIDs = [String]()
+    let scans = try await SubsonicLibrarySyncer.checkAlbumListing(
+      checkedScans: RemoteDeletionScans(albumListing: "scan-1"),
+      serverScan: RemoteServerScan(lastScan: "scan-2"),
+      requestPage: { _ in RemoteListingPage() },
+      checkListing: { _ in RemoteAlbumCandidates() },
+      verifyDeletion: { verifiedAlbumIDs.append($0) },
+      resync: { resyncedAlbumIDs.append($0) }
+    )
+    XCTAssertEqual(scans, RemoteDeletionScans(albumListing: "scan-2"))
+    XCTAssertTrue(verifiedAlbumIDs.isEmpty)
+    XCTAssertTrue(resyncedAlbumIDs.isEmpty)
+  }
+
+  func testCheckAlbumListing_VerifiesAbsentAlbumsAndResyncsAlbums() async throws {
+    var verifiedAlbumIDs = [String]()
+    var resyncedAlbumIDs = [String]()
+    let scans = try await SubsonicLibrarySyncer.checkAlbumListing(
+      checkedScans: RemoteDeletionScans(),
+      serverScan: RemoteServerScan(lastScan: "scan-2"),
+      requestPage: { offset in offset == 0 ? self.page(["a", "b"]) : RemoteListingPage() },
+      checkListing: { listing in
+        XCTAssertEqual(listing.albumIDs, ["a", "b"])
+        return RemoteAlbumCandidates(absentAlbumIDs: ["c"], resyncAlbumIDs: ["a"])
+      },
+      verifyDeletion: { verifiedAlbumIDs.append($0) },
+      resync: { resyncedAlbumIDs.append($0) }
+    )
+    XCTAssertEqual(scans, RemoteDeletionScans(albumListing: "scan-2"))
+    XCTAssertEqual(verifiedAlbumIDs, ["c"])
+    XCTAssertEqual(resyncedAlbumIDs, ["a"])
   }
 }
