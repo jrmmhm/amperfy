@@ -345,6 +345,69 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertEqual(check.albumsWithRemovedSongs.count, LibraryStorage.maxRemoteDeletionCandidates)
   }
 
+  private func createSyncedAlbumsWithSongs(count: Int) -> [Album] {
+    let albums = createAlbums(count: count)
+    albums.forEach {
+      addSongs(count: 2, to: $0)
+      $0.isSongsMetaDataSynced = true
+    }
+    library.saveContext()
+    return albums
+  }
+
+  private func songListing(of albums: [Album], without songIDs: Set<String> = []) -> RemoteListing {
+    let allSongIDs = albums.flatMap { $0.songs.map { $0.id } }
+    return RemoteListing(songIDs: Set(allSongIDs).subtracting(songIDs))
+  }
+
+  func testEmptySongListing_IsNotTrusted() {
+    // a server without the empty search3 query answers with no songs
+    _ = createSyncedAlbumsWithSongs(count: 5)
+    XCTAssertNil(library.getAlbumsWithSongsMissing(for: account, fromListing: RemoteListing()))
+  }
+
+  func testSongMissingFromListing_GivesItsAlbum() {
+    let albums = createSyncedAlbumsWithSongs(count: 5)
+    let albumsWithMissingSongs = library.getAlbumsWithSongsMissing(
+      for: account,
+      fromListing: songListing(of: albums, without: ["album-3-song-1"])
+    )
+    XCTAssertEqual(albumsWithMissingSongs?.map { $0.id }, ["album-3"])
+  }
+
+  func testCompleteSongListing_GivesNoAlbum() {
+    let albums = createSyncedAlbumsWithSongs(count: 5)
+    let albumsWithMissingSongs = library.getAlbumsWithSongsMissing(
+      for: account,
+      fromListing: songListing(of: albums)
+    )
+    XCTAssertEqual(albumsWithMissingSongs?.count, 0)
+  }
+
+  func testSongMissingFromListing_IgnoresUnsyncedAlbumsAndDeletedSongs() {
+    let albums = createSyncedAlbumsWithSongs(count: 5)
+    albums[1].isSongsMetaDataSynced = false
+    albums[2].songs.first { $0.id == "album-2-song-0" }?.remoteStatus = .deleted
+    albums[3].remoteStatus = .deleted
+    library.saveContext()
+    let albumsWithMissingSongs = library.getAlbumsWithSongsMissing(
+      for: account,
+      fromListing: songListing(
+        of: albums,
+        without: ["album-1-song-0", "album-2-song-0", "album-3-song-0"]
+      )
+    )
+    XCTAssertEqual(albumsWithMissingSongs?.count, 0)
+  }
+
+  func testSongsMissingFromTooManyAlbums_AreNotTrusted() {
+    let albums = createSyncedAlbumsWithSongs(count: 5)
+    XCTAssertNil(library.getAlbumsWithSongsMissing(
+      for: account,
+      fromListing: songListing(of: albums, without: ["album-0-song-0", "album-1-song-0"])
+    ))
+  }
+
   func testRemoteDeletionPlausibility() {
     XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 1, localCount: 1))
     XCTAssertFalse(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 2, localCount: 19))

@@ -326,4 +326,94 @@ class SsRemoteListingParserTest: XCTestCase {
     XCTAssertEqual(verifiedAlbumIDs, ["c"])
     XCTAssertEqual(resyncedAlbumIDs, ["a"])
   }
+
+  func testSongListingPage() {
+    let parserDelegate = parse(getTestFileData(name: "search3_songs_example_1"))
+    XCTAssertTrue(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.page.entryCount, 3)
+    XCTAssertEqual(parserDelegate.page.listing.songIDs, ["so-1", "so-2", "so-3"])
+    XCTAssertTrue(parserDelegate.page.listing.albumIDs.isEmpty)
+  }
+
+  func testEmptySongListingPage() {
+    let parserDelegate = parse(getTestFileData(name: "search3_empty_example_1"))
+    XCTAssertTrue(parserDelegate.isValidPage)
+    XCTAssertEqual(parserDelegate.page.entryCount, 0)
+  }
+
+  func testSongListingNeeded() {
+    let scans = RemoteDeletionScans(songListing: "scan-1")
+    let newScan = RemoteServerScan(lastScan: "scan-2")
+    XCTAssertTrue(scans.isSongListingNeeded(serverScan: newScan, isSongListingAllowed: true))
+    XCTAssertFalse(scans.isSongListingNeeded(serverScan: newScan, isSongListingAllowed: false))
+    XCTAssertFalse(scans.isSongListingNeeded(
+      serverScan: RemoteServerScan(lastScan: "scan-1"),
+      isSongListingAllowed: true
+    ))
+    // a server that reports no scan never gets the song listing
+    XCTAssertFalse(scans.isSongListingNeeded(
+      serverScan: RemoteServerScan(),
+      isSongListingAllowed: true
+    ))
+    XCTAssertFalse(scans.isSongListingNeeded(
+      serverScan: RemoteServerScan(lastScan: "scan-2", isScanning: true),
+      isSongListingAllowed: true
+    ))
+  }
+
+  func testCheckSongListing_NotAllowedRequestsNothing() async throws {
+    var requestedOffsets = [Int]()
+    let scans = try await SubsonicLibrarySyncer.checkSongListing(
+      checkedScans: RemoteDeletionScans(albumListing: "scan-2", songListing: "scan-1"),
+      serverScan: RemoteServerScan(lastScan: "scan-2"),
+      isSongListingAllowed: false,
+      requestPage: { offset in
+        requestedOffsets.append(offset)
+        return RemoteListingPage()
+      },
+      checkListing: { _ in [String]() },
+      resync: { _ in }
+    )
+    XCTAssertEqual(scans, RemoteDeletionScans(albumListing: "scan-2", songListing: "scan-1"))
+    XCTAssertTrue(requestedOffsets.isEmpty)
+  }
+
+  func testCheckSongListing_FailingPageMarksNothingAndKeepsScan() async {
+    var resyncedAlbumIDs = [String]()
+    do {
+      _ = try await SubsonicLibrarySyncer.checkSongListing(
+        checkedScans: RemoteDeletionScans(songListing: "scan-1"),
+        serverScan: RemoteServerScan(lastScan: "scan-2"),
+        isSongListingAllowed: true,
+        requestPage: { _ in throw BackendError.notSupported },
+        checkListing: { _ in ["a"] },
+        resync: { resyncedAlbumIDs.append($0) }
+      )
+      XCTFail("a failing page must abort the check")
+    } catch {}
+    XCTAssertTrue(resyncedAlbumIDs.isEmpty)
+  }
+
+  func testCheckSongListing_ResyncsAlbumsWithMissingSongs() async throws {
+    var resyncedAlbumIDs = [String]()
+    let scans = try await SubsonicLibrarySyncer.checkSongListing(
+      checkedScans: RemoteDeletionScans(songListing: "scan-1"),
+      serverScan: RemoteServerScan(lastScan: "scan-2"),
+      isSongListingAllowed: true,
+      requestPage: { offset in
+        guard offset == 0 else { return RemoteListingPage() }
+        var page = RemoteListingPage()
+        page.entryCount = 2
+        page.listing.songIDs = ["s1", "s2"]
+        return page
+      },
+      checkListing: { listing in
+        XCTAssertEqual(listing.songIDs, ["s1", "s2"])
+        return ["a"]
+      },
+      resync: { resyncedAlbumIDs.append($0) }
+    )
+    XCTAssertEqual(scans, RemoteDeletionScans(songListing: "scan-2"))
+    XCTAssertEqual(resyncedAlbumIDs, ["a"])
+  }
 }

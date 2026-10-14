@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1">
+   <searchResult3>
+      <song id="so-1" parent="al-1" title="Opening" album="First Light" artist="Test Artist" track="1" duration="240" albumId="al-1" artistId="ar-1" type="music" isDir="false"/>
+      <song id="so-2" parent="al-1" title="Middle" album="First Light" artist="Test Artist" track="2" duration="250" albumId="al-1" artistId="ar-1" type="music" isDir="false"/>
+      <song id="so-3" parent="al-2" title="Single" album="Second Wind" artist="Test Artist" track="1" duration="240" albumId="al-2" artistId="ar-1" type="music" isDir="false"/>
+   </searchResult3>
+</subsonic-response>
