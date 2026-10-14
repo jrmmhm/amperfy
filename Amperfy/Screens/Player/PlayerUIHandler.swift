@@ -38,6 +38,7 @@ class PlayerUIHandler: NSObject {
   public static let playButtonImagePointSize: CGFloat = 25
   public static let bigButtonImagePointSize: CGFloat = 17
   public static let playAndNextiOSButtonImagePointSize: CGFloat = 15
+  public static let shuffleRepeatButtonImagePointSize: CGFloat = 20
 
   private var player: PlayerFacade
   private var style: PlayerUIStyle
@@ -203,13 +204,11 @@ class PlayerUIHandler: NSObject {
     case .popupPlayer:
       var config = UIButton.Configuration.player(isSelected: isSelected)
       config.image = image?
-        .withConfiguration(UIImage.SymbolConfiguration(scale: .medium))
+        .withConfiguration(
+          UIImage.SymbolConfiguration(pointSize: Self.shuffleRepeatButtonImagePointSize)
+        )
       repeatButton.configuration = config
-      #if targetEnvironment(macCatalyst)
-        repeatButton.isHidden = !appDelegate.isShowingMiniPlayer
-      #else
-        repeatButton.isHidden = false
-      #endif
+      repeatButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     repeatButton.isSelected = isSelected
   }
@@ -224,16 +223,25 @@ class PlayerUIHandler: NSObject {
     case .popupPlayer:
       var config = UIButton.Configuration.player(isSelected: player.isShuffle)
       config.image = .shuffle
-        .withConfiguration(UIImage.SymbolConfiguration(scale: .medium))
+        .withConfiguration(
+          UIImage.SymbolConfiguration(pointSize: Self.shuffleRepeatButtonImagePointSize)
+        )
       shuffleButton.configuration = config
-      #if targetEnvironment(macCatalyst)
-        shuffleButton.isHidden = !appDelegate.isShowingMiniPlayer
-      #else
-        shuffleButton.isHidden = false
-      #endif
+      shuffleButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     shuffleButton.isEnabled = appDelegate.storage.settings.user.isPlayerShuffleButtonEnabled
     shuffleButton.isSelected = player.isShuffle
+  }
+
+  /// Shuffle and repeat do not apply to podcasts. On macOS the main window's toolbar player
+  /// shows them, so the popup player only does while the mini player is shown.
+  private var isShuffleRepeatHiddenInPopupPlayer: Bool {
+    guard player.playerMode == .music else { return true }
+    #if targetEnvironment(macCatalyst)
+      return !appDelegate.isShowingMiniPlayer
+    #else
+      return false
+    #endif
   }
 
   func refreshAutoplayButton(autoplayButton: UIButton) {

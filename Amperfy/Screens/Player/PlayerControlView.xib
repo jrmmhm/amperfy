@@ -267,6 +267,7 @@
             <connections>
                 <outlet property="airplayButton" destination="l5j-2I-Ltc" id="ENH-UT-6ix"/>
                 <outlet property="audioInfoLabel" destination="fic-HG-erH" id="NjD-Ev-fjR"/>
+                <outlet property="controlStackView" destination="SoI-ny-Hw0" id="Ct7-Sk-Q3m"/>
                 <outlet property="displayPlaylistButton" destination="ZVN-JG-VAA" id="2Rh-6V-CMd"/>
                 <outlet property="elapsedTimeLabel" destination="okd-ac-nGY" id="MFD-Qa-B7r"/>
                 <outlet property="liveLabel" destination="lCe-bR-yIr" id="vcG-AT-BfK"/>

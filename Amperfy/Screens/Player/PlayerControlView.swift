@@ -28,6 +28,8 @@ import UIKit
 
 class PlayerControlView: UIView {
   static let frameHeight: CGFloat = 175
+  // shuffle and repeat beside the transport buttons, at least the minimum touch target size
+  static private let shuffleRepeatButtonSize: CGFloat = 44
   static private let margin = UIEdgeInsets(
     top: 0,
     left: UIView.defaultMarginX,
@@ -52,6 +54,8 @@ class PlayerControlView: UIView {
   weak var skipBackwardButton: UIButton!
   @IBOutlet
   weak var skipForwardButton: UIButton!
+  @IBOutlet
+  weak var controlStackView: UIStackView!
 
   @IBOutlet
   weak var timeSlider: UISlider!
@@ -95,6 +99,24 @@ class PlayerControlView: UIView {
     return button
   }()
 
+  // the control stack fills its slots equally; the containers keep the buttons square in theirs
+  private lazy var shuffleButtonContainer: UIView = Self.createContainer(for: shuffleButton)
+  private lazy var repeatButtonContainer: UIView = Self.createContainer(for: repeatButton)
+
+  private static func createContainer(for button: UIButton) -> UIView {
+    let container = UIView()
+    button.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(button)
+    NSLayoutConstraint.activate([
+      button.widthAnchor.constraint(equalToConstant: shuffleRepeatButtonSize),
+      button.heightAnchor.constraint(equalTo: button.widthAnchor),
+      button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+      button.topAnchor.constraint(equalTo: container.topAnchor),
+      button.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+    ])
+    return container
+  }
+
   required init?(coder aDecoder: NSCoder) {
     #if targetEnvironment(macCatalyst) // ok
       self.airplayVolume = MPVolumeView(frame: .zero)
@@ -136,16 +158,9 @@ class PlayerControlView: UIView {
     )
     optionsButton.accessibilityLabel = "Player Options"
 
-    // shuffle and repeat are placed in front of the volume button
-    let insertIndex = optionsStackView.arrangedSubviews.firstIndex(of: volumeButton) ??
-      optionsStackView.arrangedSubviews.count
-    for (offset, button) in [shuffleButton, repeatButton].enumerated() {
-      optionsStackView.insertArrangedSubview(button, at: insertIndex + offset)
-      NSLayoutConstraint.activate([
-        button.widthAnchor.constraint(equalToConstant: 28),
-        button.heightAnchor.constraint(equalTo: button.widthAnchor),
-      ])
-    }
+    // shuffle left and repeat right of the transport buttons
+    controlStackView.insertArrangedSubview(shuffleButtonContainer, at: 0)
+    controlStackView.addArrangedSubview(repeatButtonContainer)
 
     refreshPlayer()
     playerHandler?.refreshPlayerOptions(
@@ -322,6 +337,9 @@ class PlayerControlView: UIView {
   func refreshShuffleRepeatButtons() {
     playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
     playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
+    // a hidden container frees its slot in the control stack
+    shuffleButtonContainer.isHidden = shuffleButton.isHidden
+    repeatButtonContainer.isHidden = repeatButton.isHidden
   }
 
   func createPlaybackRateMenu() -> UIMenuElement {
@@ -543,11 +561,11 @@ extension PlayerControlView: MusicPlayable {
   func didArtworkChange() {}
 
   func didShuffleChange() {
-    playerHandler?.refreshShuffleButton(shuffleButton: shuffleButton)
+    refreshShuffleRepeatButtons()
   }
 
   func didRepeatChange() {
-    playerHandler?.refreshRepeatButton(repeatButton: repeatButton)
+    refreshShuffleRepeatButtons()
   }
 
   func didPlaybackRateChange() {}
