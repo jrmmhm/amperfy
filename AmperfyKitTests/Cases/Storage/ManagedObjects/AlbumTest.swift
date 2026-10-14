@@ -20,6 +20,7 @@
 //
 
 @testable import AmperfyKit
+import CoreData
 import XCTest
 
 // MARK: - AlbumTest
@@ -414,5 +415,167 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 2, localCount: 20))
     XCTAssertTrue(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 20, localCount: 1000))
     XCTAssertFalse(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 21, localCount: 1000))
+  }
+}
+
+// MARK: - AlbumVisibilityTest
+
+@MainActor
+class AlbumVisibilityTest: XCTestCase {
+  var cdHelper: CoreDataHelper!
+  var context: NSManagedObjectContext!
+  var library: LibraryStorage!
+  var account: Account!
+  var genre: Genre!
+  var artist: Artist!
+  var album: Album!
+
+  static let allListingSites = [
+    "album list",
+    "genre albums",
+    "genre albums search",
+    "artist albums",
+    "artist albums search",
+    "album search",
+    "random albums",
+  ]
+
+  override func setUp() async throws {
+    cdHelper = CoreDataHelper()
+    context = cdHelper.createInMemoryManagedObjectContext()
+    cdHelper.clearContext(context: context)
+    library = LibraryStorage(context: context)
+    account = library.getAccount(info: TestAccountInfo.create1())
+    genre = library.createGenre(account: account)
+    genre.name = "Test Genre"
+    artist = library.createArtist(account: account)
+    artist.id = "artist-1"
+    artist.name = "Test Artist"
+    album = library.createAlbum(account: account)
+    album.id = "album-1"
+    album.name = "Test Album"
+    album.artist = artist
+    album.genre = genre
+  }
+
+  override func tearDown() {}
+
+  private func addSongs(count: Int, isCached: Bool = false) -> [Song] {
+    (0 ..< count).map { index in
+      let song = library.createSong(account: account)
+      song.id = "song-\(index)"
+      song.title = "Song \(index)"
+      song.album = album
+      if isCached {
+        song.relFilePath = URL(string: "testSong\(index)")
+      }
+      return song
+    }
+  }
+
+  private func isListed(by predicate: NSPredicate?) -> Bool {
+    let fetchRequest: NSFetchRequest<AlbumMO> = AlbumMO.fetchRequest()
+    fetchRequest.predicate = predicate
+    let albums = (try? context.fetch(fetchRequest)) ?? []
+    return albums.contains(album.managedObject)
+  }
+
+  /// the seven places that decide whether an album is listed
+  private func listingSitesShowingAlbum() -> [String] {
+    library.saveContext()
+    let companion = CoreDataCompanion(context: context)
+    let albumList = AlbumFetchedResultsController(
+      coreDataCompanion: companion,
+      account: account,
+      sortType: .name,
+      isGroupedInAlphabeticSections: false
+    )
+    let genreAlbums = GenreAlbumsFetchedResultsController(
+      for: genre,
+      coreDataCompanion: companion,
+      isGroupedInAlphabeticSections: false
+    )
+    let genreAlbumsPredicate = genreAlbums.fetchResultsController.fetchRequest.predicate
+    genreAlbums.search(searchText: "Test", onlyCached: false)
+    let artistAlbums = ArtistAlbumsItemsFetchedResultsController(
+      for: artist,
+      coreDataCompanion: companion,
+      isGroupedInAlphabeticSections: false
+    )
+    let artistAlbumsPredicate = artistAlbums.fetchResultsController.fetchRequest.predicate
+    artistAlbums.search(searchText: "Test", onlyCached: false)
+
+    var sites = [String]()
+    if isListed(by: albumList.fetchResultsController.fetchRequest.predicate) {
+      sites.append("album list")
+    }
+    if isListed(by: genreAlbumsPredicate) {
+      sites.append("genre albums")
+    }
+    if isListed(by: genreAlbums.fetchResultsController.fetchRequest.predicate) {
+      sites.append("genre albums search")
+    }
+    if isListed(by: artistAlbumsPredicate) {
+      sites.append("artist albums")
+    }
+    if isListed(by: artistAlbums.fetchResultsController.fetchRequest.predicate) {
+      sites.append("artist albums search")
+    }
+    if isListed(by: library.getSearchAlbumsPredicate(
+      for: account,
+      searchText: "Test",
+      onlyCached: false,
+      displayFilter: .all
+    )) {
+      sites.append("album search")
+    }
+    if library.getRandomAlbums(for: account, count: 10, onlyCached: false).contains(album) {
+      sites.append("random albums")
+    }
+    return sites
+  }
+
+  func testAvailableAlbum_IsListedEverywhere() {
+    _ = addSongs(count: 2)
+    XCTAssertEqual(listingSitesShowingAlbum(), Self.allListingSites)
+  }
+
+  func testAlbumLosingSomeSongs_StaysListed() {
+    let songs = addSongs(count: 3)
+    library.saveContext()
+    album.markAsRemoteDeleted(songs: [songs[0]])
+    XCTAssertEqual(songs[0].remoteStatus, .deleted)
+    XCTAssertEqual(songs[1].remoteStatus, .available)
+    XCTAssertEqual(album.songs.count, 2)
+    XCTAssertEqual(album.remoteStatus, .available)
+    XCTAssertEqual(listingSitesShowingAlbum(), Self.allListingSites)
+  }
+
+  func testAlbumLosingLastSong_IsHiddenEverywhere() {
+    let songs = addSongs(count: 2)
+    library.saveContext()
+    album.markAsRemoteDeleted(songs: songs)
+    XCTAssertTrue(songs.allSatisfy { $0.remoteStatus == .deleted })
+    XCTAssertTrue(album.songs.isEmpty)
+    XCTAssertEqual(album.remoteStatus, .deleted)
+    XCTAssertEqual(listingSitesShowingAlbum(), [])
+  }
+
+  func testNeverSyncedAlbum_StaysListed() {
+    album.markAsRemoteDeleted(songs: [])
+    XCTAssertEqual(album.remoteStatus, .available)
+    XCTAssertEqual(listingSitesShowingAlbum(), Self.allListingSites)
+  }
+
+  func testDeletedAlbumWithDeletedDownloadedSongs_IsHiddenEverywhere() {
+    _ = addSongs(count: 2, isCached: true)
+    album.markAsRemoteDeleted()
+    XCTAssertEqual(listingSitesShowingAlbum(), [])
+  }
+
+  func testDeletedAlbumWithAvailableDownloadedSong_IsListed() {
+    _ = addSongs(count: 1, isCached: true)
+    album.remoteStatus = .deleted
+    XCTAssertEqual(listingSitesShowingAlbum(), Self.allListingSites)
   }
 }
