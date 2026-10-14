@@ -274,6 +274,7 @@ class MOCK_MusicPlayable: MusicPlayable {
 
   var expectationDidStartPlaying: XCTestExpectation?
   var expectationErrorOccurred: XCTestExpectation?
+  var playlistChangeCount = 0
 
   func didStartPlayingFromBeginning() {}
   func didStartPlaying() {
@@ -283,7 +284,10 @@ class MOCK_MusicPlayable: MusicPlayable {
   func didPause() {}
   func didStopPlaying() {}
   func didElapsedTimeChange() {}
-  func didPlaylistChange() {}
+  func didPlaylistChange() {
+    playlistChangeCount += 1
+  }
+
   func didArtworkChange() {}
   func didShuffleChange() {}
   func didRepeatChange() {}
@@ -2965,5 +2969,38 @@ class MusicPlayerTest: XCTestCase {
     backendPlayer.responder?.didItemFinishedPlaying()
     XCTAssertTrue(testPlayer.isPlaying)
     XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[1].id)
+  }
+
+  func testRemoveServerDeletedSongsFromQueues_NotifiesOnceAndKeepsPlayback() {
+    let songs = getCachedSeedSongs([4, 5, 6, 7])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[1].remoteStatus = .deleted
+    songs[3].remoteStatus = .deleted
+    mockMusicPlayable.playlistChangeCount = 0
+    testPlayer.removeServerDeletedSongsFromQueues()
+    XCTAssertEqual(mockMusicPlayable.playlistChangeCount, 1)
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().map { $0.id }, [songs[2].id])
+  }
+
+  func testRemoveServerDeletedSongsFromQueues_NothingDeleted_DoesNotNotify() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    mockMusicPlayable.playlistChangeCount = 0
+    testPlayer.removeServerDeletedSongsFromQueues()
+    XCTAssertEqual(mockMusicPlayable.playlistChangeCount, 0)
+    XCTAssertEqual(testPlayer.getAllNextQueueItems().map { $0.id }, [songs[1].id, songs[2].id])
+  }
+
+  func testRemoveServerDeletedSongsFromQueues_KeepsPlayingDeletedCurrentSong() {
+    let songs = getCachedSeedSongs([4, 5, 6])
+    testPlayer.play(context: PlayContext(name: "Deleted", playables: songs))
+    songs[0].remoteStatus = .deleted
+    mockMusicPlayable.playlistChangeCount = 0
+    testPlayer.removeServerDeletedSongsFromQueues()
+    XCTAssertEqual(mockMusicPlayable.playlistChangeCount, 0)
+    XCTAssertTrue(testPlayer.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying?.id, songs[0].id)
   }
 }

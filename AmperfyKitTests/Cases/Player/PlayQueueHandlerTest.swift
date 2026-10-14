@@ -3235,4 +3235,68 @@ class PlayQueueHandlerTest: XCTestCase {
     radio.remoteStatus = .deleted
     XCTAssertFalse(testQueueHandler.isServerDeletedSong(radio))
   }
+
+  func seedSongIds(_ seedIds: [Int]) -> [String] {
+    seedIds.map { cdHelper.seeder.songs[$0].id }
+  }
+
+  func testRemoveServerDeletedSongs_KeepsCurrentAndOrder() {
+    prepareNoWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    markServerDeleted(seedIds: [1, 4, 6])
+    XCTAssertTrue(testQueueHandler.removeServerDeletedSongs())
+    XCTAssertEqual(testQueueHandler.currentlyPlaying?.id, seedSongIds([2])[0])
+    XCTAssertEqual(testQueueHandler.getAllPrevQueueItems().map { $0.id }, seedSongIds([0]))
+    XCTAssertEqual(testQueueHandler.getAllUserQueueItems().map { $0.id }, seedSongIds([5, 7, 8]))
+    XCTAssertEqual(testQueueHandler.getAllNextQueueItems().map { $0.id }, seedSongIds([3]))
+  }
+
+  func testRemoveServerDeletedSongs_WhileUserQueuePlaying() {
+    prepareWithWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    XCTAssertEqual(testQueueHandler.currentlyPlaying?.id, seedSongIds([5])[0])
+    markServerDeleted(seedIds: [1, 3, 7])
+    XCTAssertTrue(testQueueHandler.removeServerDeletedSongs())
+    XCTAssertEqual(testQueueHandler.currentlyPlaying?.id, seedSongIds([5])[0])
+    XCTAssertEqual(testQueueHandler.getAllPrevQueueItems().map { $0.id }, seedSongIds([0, 2]))
+    XCTAssertEqual(testQueueHandler.getAllUserQueueItems().map { $0.id }, seedSongIds([6, 8]))
+    XCTAssertEqual(testQueueHandler.getAllNextQueueItems().map { $0.id }, seedSongIds([4]))
+  }
+
+  func testRemoveServerDeletedSongs_NothingDeleted() {
+    prepareNoWaitingQueuePlaying()
+    testPlayer.setCurrentIndex(2)
+    XCTAssertFalse(testQueueHandler.removeServerDeletedSongs())
+    XCTAssertEqual(testQueueHandler.getAllPrevQueueItems().map { $0.id }, seedSongIds([0, 1]))
+    XCTAssertEqual(
+      testQueueHandler.getAllUserQueueItems().map { $0.id },
+      seedSongIds([5, 6, 7, 8])
+    )
+    XCTAssertEqual(testQueueHandler.getAllNextQueueItems().map { $0.id }, seedSongIds([3, 4]))
+  }
+
+  func testRemoveServerDeletedSongs_KeepsDeletedCurrentSong() {
+    testPlayer.removeAllItems()
+    fillPlayerWithSomeSongs()
+    testPlayer.setCurrentIndex(2)
+    markServerDeleted(seedIds: [2])
+    XCTAssertFalse(testQueueHandler.removeServerDeletedSongs())
+    XCTAssertEqual(testQueueHandler.currentlyPlaying?.id, seedSongIds([2])[0])
+    XCTAssertEqual(testQueueHandler.getAllNextQueueItems().map { $0.id }, seedSongIds([3, 4]))
+  }
+
+  func testRemoveServerDeletedSongs_Shuffled() {
+    testPlayer.removeAllItems()
+    fillPlayerWithSomeSongs()
+    testPlayer.setShuffle(true)
+    guard let deletedSong = testQueueHandler.getNextQueueItem(at: 0) else { XCTFail(); return }
+    let currentSongId = testQueueHandler.currentlyPlaying?.id
+    deletedSong.remoteStatus = .deleted
+    XCTAssertTrue(testQueueHandler.removeServerDeletedSongs())
+    XCTAssertEqual(testQueueHandler.currentlyPlaying?.id, currentSongId)
+    XCTAssertFalse(testQueueHandler.getAllNextQueueItems().contains(deletedSong))
+    testPlayer.setShuffle(false)
+    XCTAssertFalse(testPlayer.contextQueue.playables.contains(deletedSong))
+    XCTAssertEqual(testPlayer.contextQueue.playables.count, fillCount - 1)
+  }
 }
