@@ -469,6 +469,12 @@ class SsRemoteListingParserTest: XCTestCase {
     XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-5"), .noAnswer)
   }
 
+  func testAnswer_ForeignXmlWithErrorIsNoAnswer() {
+    let parserDelegate = parse(Data("<proxy><error code=\"70\"/></proxy>".utf8))
+    XCTAssertEqual(parserDelegate.songAnswer(songID: "so-7"), .noAnswer)
+    XCTAssertEqual(parserDelegate.albumAnswer(albumID: "al-5"), .noAnswer)
+  }
+
   func testVerifySongDeletions_DeletesOnlyOnAPositiveAnswer() async {
     var requestedAlbumIDs = [String]()
     let verification = await SubsonicLibrarySyncer.verifySongDeletions(
