@@ -302,7 +302,8 @@ public class MetaManager {
 
   private static let remoteDeletionSyncMinInterval: TimeInterval = 60
   private static let songListingMinInterval: TimeInterval = 30 * 60
-  private var isRemoteDeletionSyncRunning = false
+  private var remoteDeletionSyncTask: Task<(), Never>?
+  /// set by pull-to-refresh only, so that the app start check never holds back a pull
   private var remoteDeletionSyncDate: Date?
   private var songListingDate: Date?
   private var remoteDeletionScans = RemoteDeletionScans()
@@ -310,16 +311,31 @@ public class MetaManager {
   private var heldServerDeletedDownloads = [String: ServerDeletedDownloadEvidence]()
   private var player: PlayerFacade?
 
-  /// Detects albums and songs deleted on the server (app start and pull-to-refresh)
+  /// Detects albums and songs deleted on the server (app start and pull-to-refresh). A pull
+  /// waits for a running check and then decides on its own whether to check again.
   public func syncRemoteDeletions(isAppStart: Bool = false) async {
-    guard settings.user.isOnlineMode, !isRemoteDeletionSyncRunning else { return }
-    if let remoteDeletionSyncDate,
-       Date().timeIntervalSince(remoteDeletionSyncDate) < Self.remoteDeletionSyncMinInterval {
-      return
+    while let runningSync = remoteDeletionSyncTask {
+      guard !isAppStart else { return }
+      await runningSync.value
     }
-    isRemoteDeletionSyncRunning = true
-    defer { isRemoteDeletionSyncRunning = false }
-    remoteDeletionSyncDate = Date()
+    // no await from here until the check is stored, so two waiting pulls start one check
+    guard settings.user.isOnlineMode else { return }
+    if !isAppStart {
+      if let remoteDeletionSyncDate,
+         Date().timeIntervalSince(remoteDeletionSyncDate) < Self.remoteDeletionSyncMinInterval {
+        return
+      }
+      remoteDeletionSyncDate = Date()
+    }
+    let sync = Task {
+      await self.runRemoteDeletionSync(isAppStart: isAppStart)
+      self.remoteDeletionSyncTask = nil
+    }
+    remoteDeletionSyncTask = sync
+    await sync.value
+  }
+
+  private func runRemoteDeletionSync(isAppStart: Bool) async {
     // the song listing pages the whole library: never at app start, only on Wi-Fi or
     // Ethernet and at most every 30 minutes
     var isSongListingAllowed = !isAppStart && networkMonitor.isWifiOrEthernet
