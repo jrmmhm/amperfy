@@ -820,6 +820,9 @@ class MusicPlayerTest: XCTestCase {
     XCTAssertEqual(playerData.activeQueue.playables.first, songs[250])
     XCTAssertEqual(Set(playerData.activeQueue.playables.map { $0.id }), songIds)
     XCTAssertEqual(playerData.activeQueue.playables.count, 500)
+    // 500 songs in context order after shuffling are practically impossible
+    let songsWithoutCurrent = songs.filter { $0 != songs[250] }
+    XCTAssertNotEqual(Array(playerData.activeQueue.playables[1...]), songsWithoutCurrent)
     checkOrdersAscending(playerData.activeQueue)
 
     testPlayer.toggleShuffle()
