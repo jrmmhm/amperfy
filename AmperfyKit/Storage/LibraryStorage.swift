@@ -75,6 +75,8 @@ struct RemoteAlbumListingCheck {
   var absentAlbums = [Album]()
   /// song-synced albums with more local songs than the server reports
   var albumsWithRemovedSongs = [Album]()
+  /// song-synced albums the server reports with more songs; also set for an untrusted listing
+  var albumsWithAddedSongs = [Album]()
   /// albums marked deleted that the listing contains again
   var reappearedAlbums = [Album]()
 }
@@ -1580,10 +1582,31 @@ public class LibraryStorage: PlayableFileCachable {
       .filter { !$0.id.isEmpty }
     let availableAlbums = albums.filter { $0.remoteStatus == .available }
     let absentAlbums = availableAlbums.filter { !listing.albumIDs.contains($0.id) }
+
+    // An added song deletes nothing, so an untrusted listing may still resync albums that
+    // grew. Navidrome counts songs whose files are missing, so such an album keeps a higher
+    // server count after its resync; albums whose stored server count differs come first.
+    let albumsWithAddedSongs = availableAlbums.filter { album in
+      guard album.isSongsMetaDataSynced,
+            let remoteSongCount = listing.albumSongCounts[album.id] else { return false }
+      return remoteSongCount > Int(album.managedObject.songCount)
+    }
+    let newCountAlbums = albumsWithAddedSongs.filter {
+      listing.albumSongCounts[$0.id] != $0.remoteSongCount
+    }
+    // shuffled, so that a fixed set of albums with missing files never takes every place
+    let knownCountAlbums = albumsWithAddedSongs.filter {
+      listing.albumSongCounts[$0.id] == $0.remoteSongCount
+    }.shuffled()
+    let cappedAlbumsWithAddedSongs = Array(
+      (newCountAlbums + knownCountAlbums)
+        .prefix(Self.maxRemoteDeletionCandidates)
+    )
+
     guard Self.isRemoteAlbumDeletionPlausible(
       candidateCount: absentAlbums.count,
       localCount: availableAlbums.count
-    ) else { return RemoteAlbumListingCheck() }
+    ) else { return RemoteAlbumListingCheck(albumsWithAddedSongs: cappedAlbumsWithAddedSongs) }
 
     // Navidrome counts songs whose files are missing, so only a lower server count is a hint
     let albumsWithRemovedSongs = availableAlbums.filter { album in
@@ -1598,6 +1621,7 @@ public class LibraryStorage: PlayableFileCachable {
         albumsWithRemovedSongs
           .prefix(Self.maxRemoteDeletionCandidates)
       ),
+      albumsWithAddedSongs: cappedAlbumsWithAddedSongs,
       // an album listed with no songs left stays deleted
       reappearedAlbums: albums.filter {
         $0.remoteStatus == .deleted && listing.albumIDs.contains($0.id) &&

@@ -29,6 +29,19 @@ struct RemoteAlbumCandidates: Sendable {
   var absentAlbumIDs = [String]()
   var resyncAlbumIDs = [String]()
   var hasReappearedAlbums = false
+  /// false if the guard did not trust the listing; then only albums with added songs are resynced
+  var isListingTrusted = false
+}
+
+extension RemoteAlbumCandidates {
+  init(check: RemoteAlbumListingCheck) {
+    self.init(
+      absentAlbumIDs: check.absentAlbums.map { $0.id },
+      resyncAlbumIDs: (check.albumsWithRemovedSongs + check.albumsWithAddedSongs).map { $0.id },
+      hasReappearedAlbums: !check.reappearedAlbums.isEmpty,
+      isListingTrusted: check.isPlausible
+    )
+  }
 }
 
 // MARK: - SubsonicLibrarySyncer
@@ -535,9 +548,10 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         return try self.parseListingPage(response: response)
       },
       checkListing: { listing in
-        guard let candidates = try await self.checkRemoteAlbumListing(listing) else {
+        let candidates = try await self.checkRemoteAlbumListing(listing)
+        guard candidates.isListingTrusted else {
           isGuardTripped = true
-          return RemoteAlbumCandidates()
+          return candidates
         }
         isListingTrusted = true
         if candidates.hasReappearedAlbums {
@@ -724,9 +738,9 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
     return parserDelegate.page
   }
 
-  /// Returns nil if the listing is not trusted
+  /// A listing that is not trusted gives only the albums with added songs
   private func checkRemoteAlbumListing(_ listing: RemoteListing) async throws
-    -> RemoteAlbumCandidates? {
+    -> RemoteAlbumCandidates {
     try await storage.async.performAndGet { asyncCompanion in
       let accountAsync = asyncCompanion.library.getAccount(managedObjectId: self.accountObjectId)
       let check = asyncCompanion.library.checkRemoteAlbumListing(
@@ -740,7 +754,7 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
           type: .info,
           listing.count
         )
-        return nil
+        return RemoteAlbumCandidates(check: check)
       }
       // an album the server lists again is song-synced again by the background sync
       for album in check.reappearedAlbums {
@@ -748,11 +762,7 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         album.remoteStatus = .available
         album.isSongsMetaDataSynced = false
       }
-      return RemoteAlbumCandidates(
-        absentAlbumIDs: check.absentAlbums.map { $0.id },
-        resyncAlbumIDs: check.albumsWithRemovedSongs.map { $0.id },
-        hasReappearedAlbums: !check.reappearedAlbums.isEmpty
-      )
+      return RemoteAlbumCandidates(check: check)
     }
   }
 
