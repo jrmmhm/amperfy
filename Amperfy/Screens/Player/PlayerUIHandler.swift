@@ -41,9 +41,13 @@ class PlayerUIHandler: NSObject {
   public static let shuffleRepeatButtonImagePointSize: CGFloat = 15
   // insets the visible bezel of 32 pt within the 44 pt touch target
   public static let shuffleRepeatButtonBezelInset: CGFloat = 6
+  public static let shuffleRepeatStateChangeDuration = TimeInterval(0.22)
 
   private var player: PlayerFacade
   private var style: PlayerUIStyle
+  // the states the popup player's shuffle and repeat buttons show, to animate only real changes
+  private var displayedShuffle: Bool?
+  private var displayedEndOfQueueMode: EndOfQueueMode?
 
   init(player: PlayerFacade, style: PlayerUIStyle) {
     self.player = player
@@ -229,7 +233,17 @@ class PlayerUIHandler: NSObject {
       repeatButton.tintColor = isSelected ? .tintColor : .secondaryLabel
       repeatButton.backgroundColor = isSelected ? .tintColor.withAlphaComponent(0.2) : .clear
     case .popupPlayer:
-      repeatButton.configuration = shuffleRepeatConfiguration(image: image, isSelected: isSelected)
+      let isAnimated = DisplayedStateChange.isAnimated(
+        from: displayedEndOfQueueMode,
+        to: mode,
+        isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+      )
+      displayedEndOfQueueMode = mode
+      applyShuffleRepeatConfiguration(
+        shuffleRepeatConfiguration(image: image, isSelected: isSelected),
+        to: repeatButton,
+        isAnimated: isAnimated
+      )
       repeatButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     // a press does nothing in podcast mode
@@ -245,9 +259,16 @@ class PlayerUIHandler: NSObject {
       shuffleButton.tintColor = player.isShuffle ? .tintColor : .secondaryLabel
       shuffleButton.backgroundColor = player.isShuffle ? .tintColor.withAlphaComponent(0.2) : .clear
     case .popupPlayer:
-      shuffleButton.configuration = shuffleRepeatConfiguration(
-        image: .shuffle,
-        isSelected: player.isShuffle
+      let isAnimated = DisplayedStateChange.isAnimated(
+        from: displayedShuffle,
+        to: player.isShuffle,
+        isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+      )
+      displayedShuffle = player.isShuffle
+      applyShuffleRepeatConfiguration(
+        shuffleRepeatConfiguration(image: .shuffle, isSelected: player.isShuffle),
+        to: shuffleButton,
+        isAnimated: isAnimated
       )
       shuffleButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
@@ -277,6 +298,30 @@ class PlayerUIHandler: NSObject {
       trailing: inset
     )
     return config
+  }
+
+  /// Applies a new shuffle or repeat look, as a short eased cross-dissolve of symbol and colors
+  /// when the displayed state changed.
+  private func applyShuffleRepeatConfiguration(
+    _ config: UIButton.Configuration,
+    to button: UIButton,
+    isAnimated: Bool
+  ) {
+    guard isAnimated else {
+      button.configuration = config
+      return
+    }
+    UIView.transition(
+      with: button,
+      duration: Self.shuffleRepeatStateChangeDuration,
+      options: [
+        .transitionCrossDissolve,
+        .curveEaseInOut,
+        .allowUserInteraction,
+        .beginFromCurrentState,
+      ],
+      animations: { button.configuration = config }
+    )
   }
 
   /// Shuffle and repeat do not apply to podcasts. On macOS the main window's toolbar player

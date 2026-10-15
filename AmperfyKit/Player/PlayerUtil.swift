@@ -137,6 +137,23 @@ public enum PlayableChange {
   }
 }
 
+// MARK: - DisplayedStateChange
+
+public enum DisplayedStateChange {
+  /// Whether a refresh animates the change of a displayed state, e.g. of a toggle button: only
+  /// when the state differs from the one shown before and without Reduce Motion, so no animation
+  /// on first display or on refreshes that show the same state again.
+  public static func isAnimated<State: Equatable>(
+    from displayedState: State?,
+    to state: State,
+    isReduceMotionEnabled: Bool
+  )
+    -> Bool {
+    guard let displayedState else { return false }
+    return displayedState != state && !isReduceMotionEnabled
+  }
+}
+
 // MARK: - RepeatMode
 
 public enum RepeatMode: Int16, CaseIterable {
