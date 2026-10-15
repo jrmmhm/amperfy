@@ -44,6 +44,138 @@ class PlayerUtilTest: XCTestCase {
     XCTAssertFalse(PlayableChange.isAnimated(from: "a", to: "b", isReduceMotionEnabled: true))
   }
 
+  // MARK: - Song change waits for the artwork
+
+  private func displayUpdate(
+    _ displayedPlayableID: String?,
+    _ awaitedPlayableID: String?,
+    _ playableID: String?
+  )
+    -> PlayableChange.DisplayUpdate {
+    PlayableChange.displayUpdate(
+      displayedPlayableID: displayedPlayableID,
+      awaitedPlayableID: awaitedPlayableID,
+      playableID: playableID
+    )
+  }
+
+  func testPlayableChangeAwaitsTheArtworkOfAnotherPlayable() {
+    XCTAssertEqual(displayUpdate("a", nil, "b"), .awaitArtwork)
+  }
+
+  func testPlayableChangeKeepsAwaitingOnRefreshesOfTheAwaitedPlayable() {
+    XCTAssertEqual(displayUpdate("a", "b", "b"), .keepAwaiting)
+  }
+
+  func testPlayableChangeAwaitsTheNewestPlayableWhenSkippingOnWhileAwaiting() {
+    XCTAssertEqual(displayUpdate("a", "b", "c"), .awaitArtwork)
+  }
+
+  func testPlayableChangeIsImmediateWithoutAChangeBetweenTwoPlayables() {
+    XCTAssertEqual(displayUpdate(nil, nil, "a"), .immediate)
+    XCTAssertEqual(displayUpdate("a", nil, "a"), .immediate)
+    XCTAssertEqual(displayUpdate("a", nil, nil), .immediate)
+    XCTAssertEqual(displayUpdate(nil, nil, nil), .immediate)
+    // back to the displayed playable or to an empty player while another one is awaited
+    XCTAssertEqual(displayUpdate("a", "b", "a"), .immediate)
+    XCTAssertEqual(displayUpdate("a", "b", nil), .immediate)
+  }
+
+  func testPlayableChangeResolutionIsCurrentOnlyForTheAwaitedAndPlayingPlayable() {
+    XCTAssertTrue(PlayableChange.isResolutionCurrent(
+      resolvedPlayableID: "b",
+      awaitedPlayableID: "b",
+      playableID: "b"
+    ))
+    XCTAssertFalse(PlayableChange.isResolutionCurrent(
+      resolvedPlayableID: "b",
+      awaitedPlayableID: "c",
+      playableID: "c"
+    ))
+    XCTAssertFalse(PlayableChange.isResolutionCurrent(
+      resolvedPlayableID: "b",
+      awaitedPlayableID: nil,
+      playableID: "b"
+    ))
+    XCTAssertFalse(PlayableChange.isResolutionCurrent(
+      resolvedPlayableID: "b",
+      awaitedPlayableID: "b",
+      playableID: "c"
+    ))
+  }
+
+  func testPlayableChangeFastSkippingShowsOnlyTheLastPlayable() {
+    // three skips a → b → c → d before any artwork is resolved
+    var displayedPlayableID: String? = "a"
+    var awaitedPlayableID: String?
+    for playableID in ["b", "c", "d"] {
+      let update = displayUpdate(displayedPlayableID, awaitedPlayableID, playableID)
+      XCTAssertEqual(update, .awaitArtwork)
+      awaitedPlayableID = playableID
+    }
+    // the resolutions finish in skip order, the newest one last
+    var shownPlayableIDs = [String]()
+    for resolvedPlayableID in ["b", "c", "d"] {
+      guard PlayableChange.isResolutionCurrent(
+        resolvedPlayableID: resolvedPlayableID,
+        awaitedPlayableID: awaitedPlayableID,
+        playableID: "d"
+      ) else { continue }
+      awaitedPlayableID = nil
+      displayedPlayableID = resolvedPlayableID
+      shownPlayableIDs.append(resolvedPlayableID)
+    }
+    XCTAssertEqual(shownPlayableIDs, ["d"])
+    XCTAssertEqual(displayedPlayableID, "d")
+    XCTAssertEqual(displayUpdate(displayedPlayableID, awaitedPlayableID, "d"), .immediate)
+  }
+
+  private func isArtworkAwaitable(
+    hasImagePath: Bool = false,
+    artworkStatus: ImageStatus? = .NotChecked,
+    artworkDisplayPreference: ArtworkDisplayPreference = .preferServerArtwork,
+    artworkDownloadSetting: ArtworkDownloadSetting = .onlyOnce,
+    isOnlineMode: Bool = true
+  )
+    -> Bool {
+    PlayableChange.isArtworkAwaitable(
+      hasImagePath: hasImagePath,
+      artworkStatus: artworkStatus,
+      artworkDisplayPreference: artworkDisplayPreference,
+      artworkDownloadSetting: artworkDownloadSetting,
+      isOnlineMode: isOnlineMode
+    )
+  }
+
+  func testArtworkWithAFileIsAwaitedForLoading() {
+    let artworkStatuses: [ImageStatus?] = [
+      .CustomImage, .NotChecked, .IsDefaultImage, .FetchError, nil,
+    ]
+    for artworkStatus in artworkStatuses {
+      XCTAssertTrue(isArtworkAwaitable(
+        hasImagePath: true,
+        artworkStatus: artworkStatus,
+        artworkDisplayPreference: .id3TagOnly,
+        artworkDownloadSetting: .never,
+        isOnlineMode: false
+      ))
+    }
+  }
+
+  func testArtworkWithoutAFileIsAwaitedOnlyWhileADownloadCanDeliverIt() {
+    XCTAssertTrue(isArtworkAwaitable())
+    XCTAssertTrue(isArtworkAwaitable(artworkDownloadSetting: .updateOncePerSession))
+    XCTAssertTrue(isArtworkAwaitable(artworkDisplayPreference: .serverArtworkOnly))
+    XCTAssertTrue(isArtworkAwaitable(artworkDisplayPreference: .preferId3Tag))
+    XCTAssertFalse(isArtworkAwaitable(artworkStatus: nil))
+    XCTAssertFalse(isArtworkAwaitable(artworkStatus: .IsDefaultImage))
+    XCTAssertFalse(isArtworkAwaitable(artworkStatus: .FetchError))
+    XCTAssertFalse(isArtworkAwaitable(artworkStatus: .CustomImage))
+    XCTAssertFalse(isArtworkAwaitable(isOnlineMode: false))
+    XCTAssertFalse(isArtworkAwaitable(artworkDownloadSetting: .never))
+    XCTAssertFalse(isArtworkAwaitable(artworkDisplayPreference: .id3TagOnly))
+  }
+
   // MARK: - Repeat button with autoplay
 
   private func setting(_ repeatMode: RepeatMode, _ isAutoplayEnabled: Bool) -> EndOfQueueSetting {
