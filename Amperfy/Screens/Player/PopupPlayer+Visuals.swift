@@ -25,6 +25,8 @@ import UIKit
 
 extension PopupPlayerVC {
   static let playableChangeAnimationDuration = TimeInterval(0.4)
+  // longest wait for the next playable's artwork before its info is shown without it
+  static let playableChangeArtworkTimeout = Duration.milliseconds(300)
 
   func refresh() {
     refreshContextQueueSectionHeader()
@@ -35,44 +37,92 @@ extension PopupPlayerVC {
   }
 
   func refreshCurrentlyPlayingInfoView() {
-    let isPlayableChangeAnimated = crossDissolveIfPlayableChanged()
-    refreshBackgroundItemArtwork()
-    if isPlayableChangeAnimated {
+    let playable = player.currentlyPlaying
+    switch PlayableChange.displayUpdate(
+      displayedPlayableID: displayedPlayableID,
+      awaitedPlayableID: awaitedPlayableID,
+      playableID: playable?.uniqueID
+    ) {
+    case .awaitArtwork:
+      guard let playable else { return }
+      awaitArtworkAndDisplay(playable: playable)
+    case .immediate:
+      awaitArtworkTask?.cancel()
+      awaitedPlayableID = nil
+      displayedPlayableID = playable?.uniqueID
+      refreshCurrentlyPlayingInfo(isAnimated: false)
+    case .keepAwaiting:
+      break
+    }
+  }
+
+  /// Keeps the displayed playable until the artwork of the new one is resolved or the wait times
+  /// out, then shows artwork, details and background of the new one together in one fade.
+  /// Only the newest change is shown, so fast skipping ends on the playing item.
+  private func awaitArtworkAndDisplay(playable: AbstractPlayable) {
+    let playableID = playable.uniqueID
+    awaitArtworkTask?.cancel()
+    awaitedPlayableID = playableID
+    var accountSetting = appDelegate.storage.settings.accounts.activeSetting.read
+    if let accountInfo = playable.account?.info {
+      accountSetting = appDelegate.storage.settings.accounts.getSetting(accountInfo).read
+    }
+    let artworkDisplayPreference = accountSetting.artworkDisplayPreference
+    let artworkDownloadSetting = accountSetting.artworkDownloadSetting
+    let isOnlineMode = appDelegate.storage.settings.user.isOnlineMode
+    awaitArtworkTask = Task { @MainActor in
+      await LibraryEntityImage.prepareImageToDisplay(
+        libraryEntity: playable,
+        artworkDisplayPreference: artworkDisplayPreference,
+        artworkDownloadSetting: artworkDownloadSetting,
+        isOnlineMode: isOnlineMode,
+        timeout: Self.playableChangeArtworkTimeout
+      )
+      guard !Task.isCancelled, PlayableChange.isResolutionCurrent(
+        resolvedPlayableID: playableID,
+        awaitedPlayableID: awaitedPlayableID,
+        playableID: player.currentlyPlaying?.uniqueID
+      ) else { return }
+      let previousPlayableID = displayedPlayableID
+      awaitedPlayableID = nil
+      displayedPlayableID = playableID
+      refreshCurrentlyPlayingInfo(isAnimated: PlayableChange.isAnimated(
+        from: previousPlayableID,
+        to: playableID,
+        isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+      ))
+    }
+  }
+
+  private func refreshCurrentlyPlayingInfo(isAnimated: Bool) {
+    if isAnimated {
+      fadeNextContentUpdate()
+      // outside the faded views: dissolves itself, also when its artwork arrives later
       largeCurrentlyPlayingView?.artworkImage
         .crossDissolveImageChangesOfNextEntity(duration: Self.playableChangeAnimationDuration)
     }
+    refreshBackgroundItemArtwork()
     largeCurrentlyPlayingView?.refresh()
     for visibleCell in tableView.visibleCells {
       if let currentlyPlayingCell = visibleCell as? CurrentlyPlayingTableCell {
-        if isPlayableChangeAnimated {
-          currentlyPlayingCell.artworkImage
-            .crossDissolveImageChangesOfNextEntity(duration: Self.playableChangeAnimationDuration)
-        }
         currentlyPlayingCell.refresh()
         break
       }
     }
   }
 
-  /// Fades the following content update when another playable started and returns whether it does;
-  /// the artworks then cross-dissolve themselves, also when their image is loaded later.
-  /// No fade on first display, to or from an empty player, or with Reduce Motion enabled.
-  private func crossDissolveIfPlayableChanged() -> Bool {
-    let previousPlayableID = displayedPlayableID
-    let playableID = player.currentlyPlaying?.uniqueID
-    displayedPlayableID = playableID
-    guard PlayableChange.isAnimated(
-      from: previousPlayableID,
-      to: playableID,
-      isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
-    ) else { return false }
-
+  /// One ease-in-ease-out fade for the following content update of the background, the details
+  /// and rating of the large player and the whole compact row including its artwork.
+  private func fadeNextContentUpdate() {
     // reloadData() defers re-attaching the cached compact cell to the next layout pass,
     // and a view removed from the hierarchy loses its animations: lay out before animating
     tableView.layoutIfNeeded()
     var views: [UIView] = [backgroundImage]
     if let largeCurrentlyPlayingView {
       views.append(largeCurrentlyPlayingView.detailsContainer)
+      if let ratingView = largeCurrentlyPlayingView.ratingView {
+        views.append(ratingView)
+      }
     }
     if let currentlyPlayingTableCell {
       views.append(currentlyPlayingTableCell.contentView)
@@ -80,10 +130,10 @@ extension PopupPlayerVC {
     let transition = CATransition()
     transition.type = .fade
     transition.duration = Self.playableChangeAnimationDuration
+    transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
     for view in views {
       view.layer.add(transition, forKey: kCATransition)
     }
-    return true
   }
 
   func refreshCurrentlyPlayingArtworks() {
@@ -203,7 +253,9 @@ extension PopupPlayerVC {
 
   @objc
   internal func downloadFinishedSuccessful(notification: Notification) {
-    guard let downloadNotification = DownloadNotification.fromNotification(notification),
+    // while the next playable's artwork is awaited, its display update sets the background
+    guard awaitedPlayableID == nil,
+          let downloadNotification = DownloadNotification.fromNotification(notification),
           let curPlayable = player.currentlyPlaying
     else { return }
     if curPlayable.uniqueID == downloadNotification.id {

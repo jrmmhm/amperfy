@@ -45,6 +45,51 @@ extension LibraryEntityImage {
       artworkType: libraryEntity.getDefaultArtworkType()
     )
   }
+
+  /// Waits at most `timeout` until the artwork to display for `libraryEntity` is in the image
+  /// cache, loading its file and also waiting for a running download, so that a following
+  /// `display(entity:)` or `getImageToDisplayImmediately` shows it at once.
+  /// Returns early when no artwork can arrive or the calling task is cancelled.
+  static public func prepareImageToDisplay(
+    libraryEntity: AbstractLibraryEntity,
+    artworkDisplayPreference: ArtworkDisplayPreference,
+    artworkDownloadSetting: ArtworkDownloadSetting,
+    isOnlineMode: Bool,
+    timeout: Duration
+  ) async {
+    let deadline = ContinuousClock.now + timeout
+    var loadingImagePath: String?
+    while !Task.isCancelled, ContinuousClock.now < deadline {
+      let imagePath = libraryEntity.imagePath(setting: artworkDisplayPreference)
+      guard PlayableChange.isArtworkAwaitable(
+        hasImagePath: imagePath != nil,
+        artworkStatus: libraryEntity.artwork?.status,
+        artworkDisplayPreference: artworkDisplayPreference,
+        artworkDownloadSetting: artworkDownloadSetting,
+        isOnlineMode: isOnlineMode
+      ) else { return }
+      if let imagePath {
+        guard Self.cache.object(forKey: imagePath as NSString) == nil else { return }
+        if imagePath != loadingImagePath {
+          loadingImagePath = imagePath
+          // unstructured, so that the timeout also bounds a slow decode
+          Task.detached(priority: .high) {
+            await Self.loadImageIntoCache(imagePath: imagePath)
+          }
+        }
+      }
+      try? await Task.sleep(for: .milliseconds(20))
+    }
+  }
+
+  @concurrent
+  static private func loadImageIntoCache(imagePath: String) async {
+    guard let readyImage = await UIImage(contentsOfFile: imagePath)?.byPreparingForDisplay()
+    else { return }
+    await MainActor.run {
+      Self.cache.setObject(readyImage, forKey: imagePath as NSString)
+    }
+  }
 }
 
 // MARK: - LibraryEntityImage
@@ -112,8 +157,7 @@ public class LibraryEntityImage: RoundedImage {
   }
 
   /// Opt-in, default off: every image change of the next entity passed to `display(entity:)`
-  /// cross-dissolves, including artwork that is loaded or downloaded afterwards. Until loaded
-  /// artwork arrives, the previous image stays visible instead of the placeholder.
+  /// cross-dissolves, including artwork that is loaded or downloaded afterwards.
   /// Ends when another entity, an artwork type or an image is displayed.
   public func crossDissolveImageChangesOfNextEntity(duration: TimeInterval) {
     isCrossDissolveArmed = true
@@ -196,10 +240,7 @@ public class LibraryEntityImage: RoundedImage {
       return
     }
 
-    // during a cross-dissolve the previous image stays until the artwork is loaded
-    if !isCrossDissolveActive || imagePathToDisplay == nil || image == nil {
-      setImage(placeholderImage)
-    }
+    setImage(placeholderImage)
     guard let imagePathToDisplay else { return }
 
     Task.detached(priority: .high) { [weak self] in
@@ -231,14 +272,7 @@ public class LibraryEntityImage: RoundedImage {
     let readyImage = await loadedImage?.byPreparingForDisplay()
     guard !Task.isCancelled else { return }
     Task { @MainActor [weak self] in
-      guard let self else { return }
-      guard let readyImage else {
-        // a kept previous image must not outlive a failed load
-        if isCrossDissolveActive, entityImagePathToDisplay == imagePath {
-          setImage(placeholderImage)
-        }
-        return
-      }
+      guard let self, let readyImage else { return }
       Self.cache.setObject(readyImage, forKey: imagePath as NSString)
       refresh()
     }

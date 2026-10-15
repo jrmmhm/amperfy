@@ -84,6 +84,57 @@ public enum PlayableChange {
     guard let previousPlayableID, let playableID else { return false }
     return previousPlayableID != playableID && !isReduceMotionEnabled
   }
+
+  /// How the display follows the playable that is playing now.
+  public enum DisplayUpdate: Equatable {
+    /// show it at once
+    case immediate
+    /// keep the displayed content until the new playable's artwork is resolved
+    case awaitArtwork
+    /// its artwork is already awaited: keep the displayed content
+    case keepAwaiting
+  }
+
+  /// A change between two different playables keeps the displayed content until the artwork of
+  /// the new one is resolved, so that artwork, details and background change together. Refreshes
+  /// of the displayed playable, the first display and changes to or from an empty player are
+  /// immediate and end any wait.
+  public static func displayUpdate(
+    displayedPlayableID: String?,
+    awaitedPlayableID: String?,
+    playableID: String?
+  )
+    -> DisplayUpdate {
+    guard let displayedPlayableID, let playableID, displayedPlayableID != playableID
+    else { return .immediate }
+    return playableID == awaitedPlayableID ? .keepAwaiting : .awaitArtwork
+  }
+
+  /// Whether a finished artwork resolution may show its playable: only the one still awaited and
+  /// still playing, so that a slower resolution of an earlier song never overwrites a newer one.
+  public static func isResolutionCurrent(
+    resolvedPlayableID: String,
+    awaitedPlayableID: String?,
+    playableID: String?
+  )
+    -> Bool {
+    resolvedPlayableID == awaitedPlayableID && resolvedPlayableID == playableID
+  }
+
+  /// Whether waiting for a playable's artwork can pay off: its file can be loaded, or a download
+  /// that is allowed and not done yet may still deliver the server artwork that is displayed.
+  public static func isArtworkAwaitable(
+    hasImagePath: Bool,
+    artworkStatus: ImageStatus?,
+    artworkDisplayPreference: ArtworkDisplayPreference,
+    artworkDownloadSetting: ArtworkDownloadSetting,
+    isOnlineMode: Bool
+  )
+    -> Bool {
+    guard !hasImagePath else { return true }
+    return artworkStatus == .NotChecked && isOnlineMode && artworkDownloadSetting != .never &&
+      artworkDisplayPreference != .id3TagOnly
+  }
 }
 
 // MARK: - RepeatMode

@@ -129,7 +129,7 @@ class LargeCurrentlyPlayingPlayerView: UIView, UIGestureRecognizerDelegate {
   private var lyricsView: LyricsView?
   private var visualizerHostingView: SwiftUIContentView?
   private var displayElement: LargeDisplayElement = .artwork
-  private var ratingView: RatingView?
+  private(set) var ratingView: RatingView?
 
   @IBOutlet
   weak var upperContainerView: UIView!

@@ -63,6 +63,9 @@ class PopupPlayerVC: UIViewController, UIScrollViewDelegate {
   var activeDisplayedSectionHeader = Set<PlayerSectionCategory>()
   // identity of the playable whose info is displayed, to detect a song change
   var displayedPlayableID: String?
+  // the playable whose artwork is resolved before its info is displayed, and that resolution
+  var awaitedPlayableID: String?
+  var awaitArtworkTask: Task<(), Never>?
   lazy var clearEmptySectionFooter = {
     let view = UIView()
     view.backgroundColor = .clear
