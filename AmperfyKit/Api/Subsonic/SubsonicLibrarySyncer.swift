@@ -35,6 +35,7 @@ struct RemoteAlbumCandidates: Sendable {
 
 extension RemoteAlbumCandidates {
   init(check: RemoteAlbumListingCheck) {
+    // an album has either fewer or more songs than stored, so no album is resynced twice
     self.init(
       absentAlbumIDs: check.absentAlbums.map { $0.id },
       resyncAlbumIDs: (check.albumsWithRemovedSongs + check.albumsWithAddedSongs).map { $0.id },
@@ -478,7 +479,8 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
 
   /// Checks the album listing once per server library scan and returns the scans checked
   /// afterwards. A failing page throws before anything is marked. A listing the guard does not
-  /// trust marks nothing but counts as checked, because the same scan gives the same answer.
+  /// trust verifies no album deletion and resyncs only albums with added songs, but counts as
+  /// checked, because the same scan gives the same answer.
   static func checkAlbumListing(
     checkedScans: RemoteDeletionScans,
     serverScan: RemoteServerScan,
