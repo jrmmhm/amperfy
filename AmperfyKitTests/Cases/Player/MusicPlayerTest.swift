@@ -307,6 +307,17 @@ class MOCK_CoreDataManager: CoreDataManagable {
   }
 }
 
+// MARK: - QueueSaveCounter
+
+final class QueueSaveCounter: NSObject {
+  var count = 0
+
+  @objc
+  func contextDidSave(_ notification: Notification) {
+    count += 1
+  }
+}
+
 // MARK: - MusicPlayerTest
 
 @MainActor
@@ -687,6 +698,163 @@ class MusicPlayerTest: XCTestCase {
       XCTAssertTrue(w.range.contains(index))
       XCTAssertEqual(w.range.lowerBound + w.index, index)
     }
+  }
+
+  func createQueueSongs(count: Int) -> [AbstractPlayable] {
+    (0 ..< count).map { index in
+      let song = library.createSong(account: account)
+      song.id = "queue-song-\(index)"
+      return song
+    }
+  }
+
+  func checkOrdersAscending(_ playlist: Playlist) {
+    let orders = playlist.managedObject.items.map { $0.order }
+    XCTAssertEqual(orders, orders.sorted())
+    XCTAssertEqual(Set(orders).count, orders.count)
+  }
+
+  func checkQueueAfterTap(songs: [AbstractPlayable], tappedIndex: Int) {
+    testPlayer.isOfflineMode = true
+    testPlayer.play(context: PlayContext(name: "Songs", index: tappedIndex, playables: songs))
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[tappedIndex])
+    XCTAssertEqual(playerData.currentIndex, tappedIndex)
+    XCTAssertEqual(testPlayer.getAllPrevQueueItems(), Array(songs[0 ..< tappedIndex]))
+    XCTAssertEqual(testPlayer.getAllNextQueueItems(), Array(songs[(tappedIndex + 1)...]))
+    XCTAssertEqual(playerData.contextQueue.playables, songs)
+    XCTAssertEqual(playerData.inactiveQueue.playables, songs)
+    let expectedOrders = (1 ... Int32(songs.count)).map { $0 * PlaylistItemMO.orderDistance }
+    XCTAssertEqual(playerData.contextQueue.managedObject.items.map { $0.order }, expectedOrders)
+    XCTAssertEqual(playerData.inactiveQueue.managedObject.items.map { $0.order }, expectedOrders)
+  }
+
+  func countSaves(during action: () -> ()) -> Int {
+    let counter = QueueSaveCounter()
+    NotificationCenter.default.addObserver(
+      counter,
+      selector: #selector(QueueSaveCounter.contextDidSave(_:)),
+      name: .NSManagedObjectContextDidSave,
+      object: cdHelper.persistentContainer.viewContext
+    )
+    action()
+    NotificationCenter.default.removeObserver(counter)
+    return counter.count
+  }
+
+  func testQueueBuild_FiveHundredSongs_TapFirst() {
+    prepareWithCachedPlaylist()
+    checkQueueAfterTap(songs: createQueueSongs(count: 500), tappedIndex: 0)
+  }
+
+  func testQueueBuild_FiveHundredSongs_TapMiddle() {
+    prepareWithCachedPlaylist()
+    checkQueueAfterTap(songs: createQueueSongs(count: 500), tappedIndex: 249)
+  }
+
+  func testQueueBuild_FiveHundredSongs_TapLast() {
+    prepareWithCachedPlaylist()
+    checkQueueAfterTap(songs: createQueueSongs(count: 500), tappedIndex: 499)
+  }
+
+  func testQueueBuild_ThreeSongs_TapLast() {
+    checkQueueAfterTap(songs: createQueueSongs(count: 3), tappedIndex: 2)
+  }
+
+  func testQueueBuild_ShuffleOn_TapTurnsShuffleOffAndKeepsOrder() {
+    let songs = createQueueSongs(count: 50)
+    checkQueueAfterTap(songs: songs, tappedIndex: 0)
+    testPlayer.toggleShuffle()
+    XCTAssertTrue(testPlayer.isShuffle)
+    checkQueueAfterTap(songs: songs, tappedIndex: 20)
+    XCTAssertFalse(testPlayer.isShuffle)
+  }
+
+  func testQueueBuild_FiveHundredSongs_RepeatAllWrapsToFirstSong() {
+    let songs = createQueueSongs(count: 500)
+    checkQueueAfterTap(songs: songs, tappedIndex: 499)
+    testPlayer.setRepeatMode(.all)
+    testPlayer.playNext()
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[0])
+    XCTAssertEqual(playerData.currentIndex, 0)
+  }
+
+  func testPlaylistOrder_AppendContinuesAfterLastItem() {
+    let playlist = library.createPlaylist(account: account)
+    let songs = createQueueSongs(count: 5)
+    playlist.append(playables: Array(songs[0 ..< 3]))
+    playlist.remove(at: 1)
+    playlist.append(playables: Array(songs[3 ..< 5]))
+    XCTAssertEqual(playlist.playables, [songs[0], songs[2], songs[3], songs[4]])
+    XCTAssertEqual(playlist.managedObject.items.map { $0.order }, [32, 96, 128, 160])
+  }
+
+  func testPlaylistArtwork_AppendUpdatesArtworkItems() {
+    let playlist = library.createPlaylist(account: account)
+    let songs = createQueueSongs(count: 6)
+    songs[1].artwork = library.createArtwork(account: account)
+    songs[4].artwork = library.createArtwork(account: account)
+    playlist.append(playables: songs)
+    XCTAssertEqual(playlist.artworkItems.map { $0.playable }, [songs[1], songs[4]])
+  }
+
+  func testPlaylistArtwork_MoveBeyondLookCountUpdatesArtworkItems() {
+    let playlist = library.createPlaylist(account: account)
+    let songs = createQueueSongs(count: 25)
+    songs[22].artwork = library.createArtwork(account: account)
+    songs[23].artwork = library.createArtwork(account: account)
+    playlist.append(playables: songs)
+    XCTAssertEqual(playlist.artworkItems.map { $0.playable }, [songs[22]])
+    playlist.movePlaylistItem(fromIndex: 23, to: 22)
+    XCTAssertEqual(playlist.artworkItems.map { $0.playable }, [songs[23]])
+  }
+
+  func testShuffleToggle_FiveHundredSongs_OnOffOn() {
+    let songs = createQueueSongs(count: 500)
+    let songIds = Set(songs.map { $0.id })
+    checkQueueAfterTap(songs: songs, tappedIndex: 250)
+
+    testPlayer.toggleShuffle()
+    XCTAssertTrue(testPlayer.isShuffle)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[250])
+    XCTAssertEqual(playerData.currentIndex, 0)
+    XCTAssertEqual(playerData.activeQueue.playables.first, songs[250])
+    XCTAssertEqual(Set(playerData.activeQueue.playables.map { $0.id }), songIds)
+    XCTAssertEqual(playerData.activeQueue.playables.count, 500)
+    checkOrdersAscending(playerData.activeQueue)
+
+    testPlayer.toggleShuffle()
+    XCTAssertFalse(testPlayer.isShuffle)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[250])
+    XCTAssertEqual(playerData.currentIndex, 250)
+    XCTAssertEqual(playerData.activeQueue.playables, songs)
+    XCTAssertEqual(testPlayer.getAllPrevQueueItems(), Array(songs[0 ..< 250]))
+
+    testPlayer.toggleShuffle()
+    XCTAssertTrue(testPlayer.isShuffle)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[250])
+    XCTAssertEqual(playerData.currentIndex, 0)
+    XCTAssertEqual(playerData.activeQueue.playables.first, songs[250])
+    XCTAssertEqual(Set(playerData.activeQueue.playables.map { $0.id }), songIds)
+    checkOrdersAscending(playerData.activeQueue)
+  }
+
+  func testShuffleToggle_ShuffleOnSavesAtMostThreeTimes() {
+    let songs = createQueueSongs(count: 50)
+    checkQueueAfterTap(songs: songs, tappedIndex: 3)
+    let saveCount = countSaves { playerData.setShuffle(true) }
+    XCTAssertLessThanOrEqual(saveCount, 3)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[3])
+    XCTAssertEqual(playerData.currentIndex, 0)
+  }
+
+  func testShuffleToggle_ShuffleOffSavesOnce() {
+    let songs = createQueueSongs(count: 50)
+    checkQueueAfterTap(songs: songs, tappedIndex: 3)
+    playerData.setShuffle(true)
+    let saveCount = countSaves { playerData.setShuffle(false) }
+    XCTAssertEqual(saveCount, 1)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songs[3])
+    XCTAssertEqual(playerData.currentIndex, 3)
   }
 
   func testPlay_EmptyPlaylist() {
