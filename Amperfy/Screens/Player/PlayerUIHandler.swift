@@ -45,6 +45,8 @@ class PlayerUIHandler: NSObject {
 
   private var player: PlayerFacade
   private var style: PlayerUIStyle
+  // the shuffle state of a press, shown until the player has applied it
+  private var requestedShuffle: Bool?
   // the states the popup player's shuffle and repeat buttons show, to animate only real changes
   private var displayedShuffle: Bool?
   private var displayedEndOfQueueMode: EndOfQueueMode?
@@ -84,8 +86,21 @@ class PlayerUIHandler: NSObject {
     }
   }
 
+  /// The button shows the new state in the same tap: reshuffling a long queue blocks the main
+  /// thread for a moment, so it starts only after the new state is committed for display.
   func shuffleButtonPushed() {
-    player.toggleShuffle()
+    let isShuffle = !(requestedShuffle ?? player.isShuffle)
+    requestedShuffle = isShuffle
+    Task { @MainActor in
+      // a task on the main actor runs before the run loop commits the pending display update
+      CATransaction.flush()
+      // a later press replaces this one
+      guard requestedShuffle == isShuffle else { return }
+      requestedShuffle = nil
+      if player.isShuffle != isShuffle {
+        player.toggleShuffle()
+      }
+    }
   }
 
   private var endOfQueueSetting: EndOfQueueSetting {
@@ -252,28 +267,29 @@ class PlayerUIHandler: NSObject {
   }
 
   func refreshShuffleButton(shuffleButton: UIButton) {
+    let isShuffle = requestedShuffle ?? player.isShuffle
     switch style {
     case .miniPlayeriOS, .miniPlayerMac:
       shuffleButton.configuration?.image = .shuffle
         .withConfiguration(UIImage.SymbolConfiguration(scale: .medium))
-      shuffleButton.tintColor = player.isShuffle ? .tintColor : .secondaryLabel
-      shuffleButton.backgroundColor = player.isShuffle ? .tintColor.withAlphaComponent(0.2) : .clear
+      shuffleButton.tintColor = isShuffle ? .tintColor : .secondaryLabel
+      shuffleButton.backgroundColor = isShuffle ? .tintColor.withAlphaComponent(0.2) : .clear
     case .popupPlayer:
       let isAnimated = DisplayedStateChange.isAnimated(
         from: displayedShuffle,
-        to: player.isShuffle,
+        to: isShuffle,
         isReduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
       )
-      displayedShuffle = player.isShuffle
+      displayedShuffle = isShuffle
       applyShuffleRepeatConfiguration(
-        shuffleRepeatConfiguration(image: .shuffle, isSelected: player.isShuffle),
+        shuffleRepeatConfiguration(image: .shuffle, isSelected: isShuffle),
         to: shuffleButton,
         isAnimated: isAnimated
       )
       shuffleButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     shuffleButton.isEnabled = appDelegate.storage.settings.user.isPlayerShuffleButtonEnabled
-    shuffleButton.isSelected = player.isShuffle
+    shuffleButton.isSelected = isShuffle
   }
 
   /// The popup player's shuffle and repeat look: a bezel smaller than the touch target and the
