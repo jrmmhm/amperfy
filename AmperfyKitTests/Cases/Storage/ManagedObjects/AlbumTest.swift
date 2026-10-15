@@ -383,6 +383,120 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertEqual(check.albumsWithRemovedSongs.count, LibraryStorage.maxRemoteDeletionCandidates)
   }
 
+  private func createSyncedAlbums(count: Int, songCount: Int) -> [Album] {
+    let albums = createAlbums(count: count)
+    albums.forEach {
+      addSongs(count: songCount, to: $0)
+      $0.isSongsMetaDataSynced = true
+    }
+    library.saveContext()
+    return albums
+  }
+
+  func testAddedSong_GrownOneSongAlbumIsResynced() {
+    let albums = createSyncedAlbums(count: 5, songCount: 1)
+    var songCounts = Dictionary(uniqueKeysWithValues: albums.map { ($0.id, 1) })
+    songCounts["album-1"] = 2
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: songCounts)
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.albumsWithAddedSongs.map { $0.id }, ["album-1"])
+    let candidates = RemoteAlbumCandidates(check: check)
+    XCTAssertTrue(candidates.isListingTrusted)
+    XCTAssertEqual(candidates.resyncAlbumIDs, ["album-1"])
+  }
+
+  func testAddedSongs_OnlyMoreServerSongsOfSyncedAlbums() {
+    let albums = createSyncedAlbums(count: 5, songCount: 2)
+    albums[2].isSongsMetaDataSynced = false
+    library.saveContext()
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: [
+        "album-0": 1, // a song was removed on the server
+        "album-1": 3, // a song was added on the server
+        "album-2": 3, // songs never synced
+        "album-3": 2, // unchanged
+        // album-4 without a song count
+      ])
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(check.albumsWithAddedSongs.map { $0.id }, ["album-1"])
+    XCTAssertEqual(check.albumsWithRemovedSongs.map { $0.id }, ["album-0"])
+    XCTAssertEqual(RemoteAlbumCandidates(check: check).resyncAlbumIDs, ["album-0", "album-1"])
+  }
+
+  func testAddedSongs_UntrustedListingStillResyncsGrownAlbum() {
+    let albums = createSyncedAlbums(count: 17, songCount: 1)
+    let listedAlbums = Array(albums.prefix(12)) // 5 of 17 albums absent
+    var songCounts = Dictionary(uniqueKeysWithValues: listedAlbums.map { ($0.id, 1) })
+    songCounts["album-0"] = 2
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: listedAlbums, songCounts: songCounts)
+    )
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+    XCTAssertTrue(check.albumsWithRemovedSongs.isEmpty)
+    XCTAssertEqual(check.albumsWithAddedSongs.map { $0.id }, ["album-0"])
+    let candidates = RemoteAlbumCandidates(check: check)
+    XCTAssertFalse(candidates.isListingTrusted)
+    XCTAssertTrue(candidates.absentAlbumIDs.isEmpty)
+    XCTAssertFalse(candidates.hasReappearedAlbums)
+    XCTAssertEqual(candidates.resyncAlbumIDs, ["album-0"])
+  }
+
+  func testAddedSongs_AreCapped() {
+    let albums = createSyncedAlbums(count: 25, songCount: 1)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(
+        of: albums,
+        songCounts: Dictionary(uniqueKeysWithValues: albums.map { ($0.id, 2) })
+      )
+    )
+    XCTAssertEqual(check.albumsWithAddedSongs.count, LibraryStorage.maxRemoteDeletionCandidates)
+  }
+
+  func testAddedSongs_DeletedAlbumsAndAlbumsWithoutIdAreNoCandidates() {
+    let albums = createSyncedAlbums(count: 5, songCount: 1)
+    albums[4].remoteStatus = .deleted
+    let albumWithoutId = library.createAlbum(account: account)
+    addSongs(count: 1, to: albumWithoutId)
+    albumWithoutId.isSongsMetaDataSynced = true
+    library.saveContext()
+    var songCounts = Dictionary(uniqueKeysWithValues: albums.map { ($0.id, 1) })
+    songCounts["album-4"] = 2
+    songCounts[""] = 2
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: albums, songCounts: songCounts)
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertTrue(check.albumsWithAddedSongs.isEmpty)
+  }
+
+  func testAddedSongs_AlbumsWithNewServerCountComeFirst() {
+    let albums = createSyncedAlbums(count: 25, songCount: 1)
+    // album-0 ... album-19 were resynced before and keep a missing file in the server count
+    albums.prefix(20).forEach { $0.remoteSongCount = 2 }
+    // album-20 ... album-24 grew since their sync and sort after the others
+    albums.suffix(5).forEach { $0.remoteSongCount = 1 }
+    library.saveContext()
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(
+        of: albums,
+        songCounts: Dictionary(uniqueKeysWithValues: albums.map { ($0.id, 2) })
+      )
+    )
+    let addedIDs = Set(check.albumsWithAddedSongs.map { $0.id })
+    XCTAssertEqual(check.albumsWithAddedSongs.count, LibraryStorage.maxRemoteDeletionCandidates)
+    XCTAssertTrue(addedIDs.isSuperset(of: albums.suffix(5).map { $0.id }))
+  }
+
   private func createSyncedAlbumsWithSongs(count: Int) -> [Album] {
     let albums = createAlbums(count: count)
     albums.forEach {
