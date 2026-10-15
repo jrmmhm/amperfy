@@ -360,6 +360,11 @@ public class MetaManager {
       }
       eventLogger.report(topic: "Remote Deletion Sync", error: error, displayPopup: false)
     }
+    // a failed check may have marked albums before it failed; the albums list follows the
+    // store by itself, the songs list refetches
+    if run?.isLibraryChanged ?? true {
+      notificationHandler.post(name: .librarySongsSynced, object: self, userInfo: nil)
+    }
     // the queue view refreshes through the player's playlist notification
     player?.removeServerDeletedSongsFromQueues()
     await deleteDownloadsOfServerDeletedSongs(run: run)

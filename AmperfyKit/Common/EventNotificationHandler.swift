@@ -39,7 +39,7 @@ extension Notification.Name {
     .Name(rawValue: "de.amperfy.settings.offline-mode")
   public static let networkStatusChanged = Notification
     .Name(rawValue: "de.amperfy.settings.network.status.changed")
-  // new songs may be in the store, refetch: posted by the background library sync after the newest albums step and at its natural end (not by pull-to-refresh, not on stop)
+  // new songs may be in the store, refetch: posted by the background library sync after the newest albums step and at its natural end (not by pull-to-refresh, not on stop), and by the remote deletion check when it changed the library or failed
   public static let librarySongsSynced = Notification
     .Name(rawValue: "de.amperfy.library.songs.synced")
 }

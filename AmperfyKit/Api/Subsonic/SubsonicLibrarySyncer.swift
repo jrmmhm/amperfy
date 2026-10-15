@@ -28,6 +28,7 @@ import os.log
 struct RemoteAlbumCandidates: Sendable {
   var absentAlbumIDs = [String]()
   var resyncAlbumIDs = [String]()
+  var hasReappearedAlbums = false
 }
 
 // MARK: - SubsonicLibrarySyncer
@@ -521,6 +522,7 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
     guard isSyncAllowed else { return RemoteDeletionRun(scans: checkedScans) }
     var isListingTrusted = false
     var isGuardTripped = false
+    var isLibraryChanged = false
     let serverScan = await requestServerScan()
     let scans = try await Self.checkAlbumListing(
       checkedScans: checkedScans,
@@ -538,10 +540,21 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
           return RemoteAlbumCandidates()
         }
         isListingTrusted = true
+        if candidates.hasReappearedAlbums {
+          isLibraryChanged = true
+        }
         return candidates
       },
-      verifyDeletion: { albumID in await self.verifyRemoteDeletion(ofAlbumWithID: albumID) },
-      resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
+      verifyDeletion: { albumID in
+        if await self.verifyRemoteDeletion(ofAlbumWithID: albumID) {
+          isLibraryChanged = true
+        }
+      },
+      resync: { albumID in
+        await self.resyncSongs(ofAlbumWithID: albumID)
+        // a resync rewrites the album's songs, even one that ends with an error
+        isLibraryChanged = true
+      }
     )
     let checkedRunScans = try await Self.checkSongListing(
       checkedScans: scans,
@@ -565,12 +578,16 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
         isListingTrusted = true
         return albumIDs
       },
-      resync: { albumID in await self.resyncSongs(ofAlbumWithID: albumID) }
+      resync: { albumID in
+        await self.resyncSongs(ofAlbumWithID: albumID)
+        isLibraryChanged = true
+      }
     )
     return RemoteDeletionRun(
       scans: checkedRunScans,
       isListingTrusted: isListingTrusted,
-      isGuardTripped: isGuardTripped
+      isGuardTripped: isGuardTripped,
+      isLibraryChanged: isLibraryChanged
     )
   }
 
@@ -733,13 +750,15 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
       }
       return RemoteAlbumCandidates(
         absentAlbumIDs: check.absentAlbums.map { $0.id },
-        resyncAlbumIDs: check.albumsWithRemovedSongs.map { $0.id }
+        resyncAlbumIDs: check.albumsWithRemovedSongs.map { $0.id },
+        hasReappearedAlbums: !check.reappearedAlbums.isEmpty
       )
     }
   }
 
-  /// An album missing from the listing is marked deleted only if the server confirms it
-  private func verifyRemoteDeletion(ofAlbumWithID albumID: String) async {
+  /// An album missing from the listing is marked deleted only if the server confirms it.
+  /// Returns true if the album was marked.
+  private func verifyRemoteDeletion(ofAlbumWithID albumID: String) async -> Bool {
     let data: Data?
     do {
       data = try await subsonicServerApi.requestAlbum(id: albumID).data
@@ -747,20 +766,22 @@ class SubsonicLibrarySyncer: CommonLibrarySyncer, LibrarySyncer {
       // a 404 answer may still carry a Subsonic error
       data = (error as? ResponseError)?.data
     }
-    guard let data else { return }
+    guard let data else { return false }
     let parserDelegate = SsRemoteListingParserDelegate(performanceMonitor: performanceMonitor)
     parserDelegate.parse(data: data)
-    guard parserDelegate.albumVerdict == .deleted else { return }
-    try? await storage.async.perform { asyncCompanion in
+    guard parserDelegate.albumVerdict == .deleted else { return false }
+    let isMarked: Bool? = try? await storage.async.performAndGet { asyncCompanion in
       let accountAsync = asyncCompanion.library.getAccount(managedObjectId: self.accountObjectId)
       guard let album = asyncCompanion.library.getAlbum(
         for: accountAsync,
         id: albumID,
         isDetailFaultResolution: false
-      ) else { return }
+      ) else { return false }
       os_log("Album <%s> is remote deleted", log: self.log, type: .info, album.name)
       album.markAsRemoteDeleted()
+      return true
     }
+    return isMarked ?? false
   }
 
   private func resyncSongs(ofAlbumWithID albumID: String) async {

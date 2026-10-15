@@ -183,15 +183,19 @@ public struct RemoteDeletionRun: Sendable, Equatable {
   public var isListingTrusted = false
   /// a complete listing ran but its guard did not trust it
   public var isGuardTripped = false
+  /// an album was marked deleted or listed again, or an album was synced again
+  public var isLibraryChanged = false
 
   public init(
     scans: RemoteDeletionScans,
     isListingTrusted: Bool = false,
-    isGuardTripped: Bool = false
+    isGuardTripped: Bool = false,
+    isLibraryChanged: Bool = false
   ) {
     self.scans = scans
     self.isListingTrusted = isListingTrusted
     self.isGuardTripped = isGuardTripped
+    self.isLibraryChanged = isLibraryChanged
   }
 }
 
