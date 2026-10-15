@@ -102,6 +102,19 @@ class SongsVC: SingleFetchedResultsTableViewController<SongMO> {
     resultUpdateHandler?.changesDidEnd = {
       self.updateContentUnavailable()
     }
+    appDelegate.notificationHandler.register(
+      self,
+      selector: #selector(handleLibrarySongsSynced),
+      name: .librarySongsSynced,
+      object: nil
+    )
+  }
+
+  @objc
+  private func handleLibrarySongsSynced() {
+    // a hidden list refetches in viewIsAppearing
+    guard viewIfLoaded?.window != nil else { return }
+    updateSearchResults(for: searchController)
   }
 
   func updateContentUnavailable() {
@@ -516,6 +529,7 @@ class SongsVC: SingleFetchedResultsTableViewController<SongMO> {
         self.appDelegate.eventLogger.report(topic: "Songs Newest Elements Sync", error: error)
       }
       detailHeaderView?.refresh()
+      self.updateSearchResults(for: self.searchController)
       self.refreshControl?.endRefreshing()
       await self.appDelegate.getMeta(self.account.info).syncRemoteDeletions()
     }
