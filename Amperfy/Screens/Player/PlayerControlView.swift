@@ -162,6 +162,15 @@ class PlayerControlView: UIView {
     controlStackView.insertArrangedSubview(shuffleButtonContainer, at: 0)
     controlStackView.addArrangedSubview(repeatButtonContainer)
 
+    // options far left, queue far right, the optional buttons around the centered AirPlay
+    let optionsRowButtons: [UIButton] = [
+      optionsButton, volumeButton, airplayButton, playerModeButton, displayPlaylistButton,
+    ]
+    for button in optionsRowButtons {
+      optionsStackView.removeArrangedSubview(button)
+      optionsStackView.addArrangedSubview(button)
+    }
+
     refreshPlayer()
     playerHandler?.refreshPlayerOptions(
       optionsButton: optionsButton,
