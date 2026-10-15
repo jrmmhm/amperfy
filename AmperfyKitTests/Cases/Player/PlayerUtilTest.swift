@@ -176,6 +176,71 @@ class PlayerUtilTest: XCTestCase {
     XCTAssertFalse(isArtworkAwaitable(artworkDisplayPreference: .id3TagOnly))
   }
 
+  // MARK: - Shuffle and repeat state changes
+
+  func testButtonStateChangeIsNotAnimatedOnFirstDisplay() {
+    XCTAssertFalse(DisplayedStateChange.isAnimated(
+      from: nil,
+      to: true,
+      isReduceMotionEnabled: false
+    ))
+    XCTAssertFalse(DisplayedStateChange.isAnimated(
+      from: nil,
+      to: EndOfQueueMode.repeatAll,
+      isReduceMotionEnabled: false
+    ))
+  }
+
+  func testButtonStateChangeIsNotAnimatedWhenTheSameStateIsShownAgain() {
+    XCTAssertFalse(DisplayedStateChange.isAnimated(
+      from: true,
+      to: true,
+      isReduceMotionEnabled: false
+    ))
+    for mode in EndOfQueueMode.allCases {
+      XCTAssertFalse(DisplayedStateChange.isAnimated(
+        from: mode,
+        to: mode,
+        isReduceMotionEnabled: false
+      ))
+    }
+  }
+
+  func testButtonStateChangeIsAnimatedForEveryStepOfTheRepeatCycle() {
+    let cycle: [EndOfQueueMode] = [.off, .repeatAll, .repeatSingle, .autoplay, .off]
+    for (displayedMode, mode) in zip(cycle, cycle.dropFirst()) {
+      let isAnimated = DisplayedStateChange.isAnimated(
+        from: displayedMode,
+        to: mode,
+        isReduceMotionEnabled: false
+      )
+      XCTAssertTrue(isAnimated, "\(displayedMode) → \(mode)")
+    }
+    XCTAssertTrue(DisplayedStateChange.isAnimated(
+      from: false,
+      to: true,
+      isReduceMotionEnabled: false
+    ))
+    XCTAssertTrue(DisplayedStateChange.isAnimated(
+      from: true,
+      to: false,
+      isReduceMotionEnabled: false
+    ))
+  }
+
+  func testButtonStateChangeIsNotAnimatedWithReduceMotion() {
+    XCTAssertFalse(DisplayedStateChange.isAnimated(
+      from: false,
+      to: true,
+      isReduceMotionEnabled: true
+    ))
+    XCTAssertFalse(DisplayedStateChange.isAnimated(
+      from: EndOfQueueMode.repeatSingle,
+      to: .autoplay,
+      isReduceMotionEnabled: true
+    ))
+  }
+
   // MARK: - Repeat button with autoplay
 
   private func setting(_ repeatMode: RepeatMode, _ isAutoplayEnabled: Bool) -> EndOfQueueSetting {
