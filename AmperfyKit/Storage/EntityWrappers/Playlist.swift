@@ -411,9 +411,6 @@ public class Playlist: Identifyable {
     }
 
     updateChangeDate()
-    if fromIndex < Self.artworkItemMaxLookCount || to < Self.artworkItemMaxLookCount {
-      updateArtworkItems()
-    }
     updateArtworkItems()
     library.saveContext()
   }

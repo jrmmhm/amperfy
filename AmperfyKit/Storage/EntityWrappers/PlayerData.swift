@@ -201,15 +201,16 @@ extension PlayerData: PlayerStatusPersistent {
           fromIndex: indexOfCurrentItemInShuffledPlaylist,
           to: 0
         )
-        setCurrentIndex(0)
+        setCurrentIndexWithoutSaving(0)
       }
     } else {
       if let curPlayable = currentItem,
          let indexOfCurrentItemInNormalPlaylist = contextPlaylist
          .getFirstIndex(playable: curPlayable) {
-        setCurrentIndex(indexOfCurrentItemInNormalPlaylist)
+        setCurrentIndexWithoutSaving(indexOfCurrentItemInNormalPlaylist)
       }
     }
+    // one save for the index and the shuffle setting
     managedObject.shuffleSetting = newValue ? 1 : 0
     library.saveContext()
   }
@@ -360,13 +361,17 @@ extension PlayerData: PlayerQueuesPersistent {
   }
 
   func setCurrentIndex(_ newValue: Int) {
+    setCurrentIndexWithoutSaving(newValue)
+    library.saveContext()
+  }
+
+  private func setCurrentIndexWithoutSaving(_ newValue: Int) {
     switch playerMode {
     case .music:
       currentMusicIndex = newValue
     case .podcast:
       currentPodcastIndex = newValue
     }
-    library.saveContext()
   }
 
   private var currentMusicIndex: Int {
