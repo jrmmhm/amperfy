@@ -995,3 +995,222 @@ class UserSettingsDecodingTest: XCTestCase {
     XCTAssertTrue(decoded.isDeleteDownloadsOfServerDeletedSongs)
   }
 }
+
+// MARK: - MOCK_RemoteDeletionLibrarySyncer
+
+@MainActor
+final class MOCK_RemoteDeletionLibrarySyncer: LibrarySyncer {
+  var run = RemoteDeletionRun(scans: RemoteDeletionScans())
+  var error: Error?
+  var isHoldingNextCheck = false
+  private(set) var songListingAllowances = [Bool]()
+  private var heldCheck: CheckedContinuation<(), Never>?
+
+  func releaseHeldCheck() {
+    heldCheck?.resume()
+    heldCheck = nil
+  }
+
+  func syncRemoteDeletions(
+    checkedScans: RemoteDeletionScans,
+    isSongListingAllowed: Bool
+  ) async throws
+    -> RemoteDeletionRun {
+    songListingAllowances.append(isSongListingAllowed)
+    if isHoldingNextCheck {
+      isHoldingNextCheck = false
+      await withCheckedContinuation { self.heldCheck = $0 }
+    }
+    if let error { throw error }
+    return run
+  }
+
+  func verifyRemoteDeletion(ofSongsWithIDs songIDs: [String]) async
+    -> RemoteSongDeletionVerification {
+    RemoteSongDeletionVerification(uncheckedSongIDs: Set(songIDs))
+  }
+
+  func syncInitial(statusNotifyier: SyncCallbacks?) async throws {}
+  func sync(genre: Genre) async throws {}
+  func sync(artist: Artist) async throws {}
+  func sync(album: Album) async throws {}
+  func sync(song: Song) async throws {}
+  func sync(podcast: Podcast) async throws {}
+  func syncNewestAlbums(offset: Int, count: Int) async throws {}
+  func syncRecentAlbums(offset: Int, count: Int) async throws {}
+  func syncNewestPodcastEpisodes() async throws {}
+  func syncFavoriteLibraryElements() async throws {}
+  func syncRadios() async throws {}
+  func syncDownPlaylistsWithoutSongs() async throws {}
+  func syncDown(playlist: Playlist) async throws {}
+  func syncUpload(playlistToUpdateName playlist: Playlist) async throws {}
+  func syncUpload(playlistToAddSongs playlist: Playlist, songs: [Song]) async throws {}
+  func syncUpload(playlistToDeleteSong playlist: Playlist, index: Int) async throws {}
+  func syncUpload(playlistToUpdateOrder playlist: Playlist) async throws {}
+  func syncUpload(playlistIdToDelete id: String) async throws {}
+  func syncDownPodcastsWithoutEpisodes() async throws {}
+  func searchArtists(searchText: String) async throws {}
+  func searchAlbums(searchText: String) async throws {}
+  func searchSongs(searchText: String) async throws {}
+  func syncMusicFolders() async throws {}
+  func syncIndexes(musicFolder: MusicFolder) async throws {}
+  func sync(directory: Directory) async throws {}
+  func requestRandomSongs(playlist: Playlist, count: Int) async throws {}
+  func requestSimilarSongs(song: Song, count: Int) async throws -> [Song] { [] }
+  func requestPodcastEpisodeDelete(podcastEpisode: PodcastEpisode) async throws {}
+  func syncNowPlaying(song: Song, songPosition: NowPlayingSongPosition) async throws {}
+  func scrobble(song: Song, date: Date?) async throws {}
+  func setRating(song: Song, rating: Int) async throws {}
+  func setRating(album: Album, rating: Int) async throws {}
+  func setRating(artist: Artist, rating: Int) async throws {}
+  func setFavorite(song: Song, isFavorite: Bool) async throws {}
+  func setFavorite(album: Album, isFavorite: Bool) async throws {}
+  func setFavorite(artist: Artist, isFavorite: Bool) async throws {}
+  func parseLyrics(relFilePath: URL) async throws -> LyricsList { LyricsList() }
+}
+
+// MARK: - NotificationCounter
+
+final class NotificationCounter: NSObject {
+  private(set) var count = 0
+
+  @objc
+  func didReceive(_ notification: Notification) {
+    count += 1
+  }
+}
+
+// MARK: - TaskProgress
+
+@MainActor
+final class TaskProgress {
+  var isFinished = false
+}
+
+// MARK: - RemoteDeletionSyncTest
+
+@MainActor
+class RemoteDeletionSyncTest: XCTestCase {
+  var cdHelper: CoreDataHelper!
+  var storage: PersistentStorage!
+  var syncer: MOCK_RemoteDeletionLibrarySyncer!
+  var meta: MetaManager!
+  var songsRefreshCounter: NotificationCounter!
+
+  override func setUp() async throws {
+    cdHelper = CoreDataHelper()
+    let library = cdHelper.createSeededStorage()
+    storage = PersistentStorage(
+      coreDataManager: MOCK_CoreDataManager(persistentContainer: cdHelper.persistentContainer)
+    )
+    if !storage.settings.user.isOnlineMode {
+      storage.settings.user.isOfflineMode = false
+    }
+    meta = MetaManager(
+      storage: storage,
+      account: library.getAccount(info: TestAccountInfo.create1()),
+      networkMonitor: MOCK_NetworkMonitor(),
+      performanceMonitor: MOCK_PerformanceMonitor(),
+      eventLogger: EventLogger(storage: storage),
+      notificationHandler: EventNotificationHandler(),
+      localNotificationManager: LocalNotificationManager(
+        userStatistics: library.getUserStatistics(appVersion: ""),
+        storage: storage
+      )
+    )
+    syncer = MOCK_RemoteDeletionLibrarySyncer()
+    meta.librarySyncer = syncer
+    songsRefreshCounter = NotificationCounter()
+    NotificationCenter.default.addObserver(
+      songsRefreshCounter!,
+      selector: #selector(NotificationCounter.didReceive(_:)),
+      name: .librarySongsSynced,
+      object: meta
+    )
+  }
+
+  override func tearDown() async throws {
+    syncer.releaseHeldCheck()
+    NotificationCenter.default.removeObserver(songsRefreshCounter!)
+  }
+
+  /// Lets the waiting tasks run until the syncer was asked the given number of times
+  private func waitForChecks(_ count: Int) async {
+    for _ in 0 ..< 1000 where syncer.songListingAllowances.count < count {
+      await Task.yield()
+    }
+  }
+
+  private func letWaitingTasksRun() async {
+    for _ in 0 ..< 100 {
+      await Task.yield()
+    }
+  }
+
+  func testPullRightAfterAppStartCheck_RunsItsOwnCheckWithSongListing() async {
+    await meta.syncRemoteDeletions(isAppStart: true)
+    await meta.syncRemoteDeletions()
+    XCTAssertEqual(syncer.songListingAllowances, [false, true])
+  }
+
+  func testPullDuringAppStartCheck_WaitsThenRunsItsOwnCheck() async {
+    let meta = meta!
+    let pullProgress = TaskProgress()
+    syncer.isHoldingNextCheck = true
+    let appStart = Task { await meta.syncRemoteDeletions(isAppStart: true) }
+    await waitForChecks(1)
+    let pull = Task {
+      await meta.syncRemoteDeletions()
+      pullProgress.isFinished = true
+    }
+    await letWaitingTasksRun()
+    XCTAssertEqual(syncer.songListingAllowances, [false])
+    XCTAssertFalse(pullProgress.isFinished)
+    syncer.releaseHeldCheck()
+    await appStart.value
+    await pull.value
+    XCTAssertTrue(pullProgress.isFinished)
+    XCTAssertEqual(syncer.songListingAllowances, [false, true])
+  }
+
+  func testSecondPullWithinAMinute_DoesNotCheckAgain() async {
+    await meta.syncRemoteDeletions()
+    await meta.syncRemoteDeletions()
+    XCTAssertEqual(syncer.songListingAllowances, [true])
+  }
+
+  func testTwoPullsDuringAppStartCheck_StartOneCheck() async {
+    let meta = meta!
+    syncer.isHoldingNextCheck = true
+    let appStart = Task { await meta.syncRemoteDeletions(isAppStart: true) }
+    await waitForChecks(1)
+    let firstPull = Task { await meta.syncRemoteDeletions() }
+    let secondPull = Task { await meta.syncRemoteDeletions() }
+    await letWaitingTasksRun()
+    XCTAssertEqual(syncer.songListingAllowances.count, 1)
+    syncer.releaseHeldCheck()
+    await appStart.value
+    await firstPull.value
+    await secondPull.value
+    XCTAssertEqual(syncer.songListingAllowances, [false, true])
+  }
+
+  func testCheckThatChangedTheLibrary_PostsSongsRefresh() async {
+    syncer.run = RemoteDeletionRun(scans: RemoteDeletionScans(), isLibraryChanged: true)
+    await meta.syncRemoteDeletions()
+    XCTAssertEqual(songsRefreshCounter.count, 1)
+  }
+
+  func testCheckWithoutChanges_PostsNothing() async {
+    await meta.syncRemoteDeletions()
+    XCTAssertEqual(syncer.songListingAllowances.count, 1)
+    XCTAssertEqual(songsRefreshCounter.count, 0)
+  }
+
+  func testFailedCheck_PostsSongsRefresh() async {
+    syncer.error = BackendError.notSupported
+    await meta.syncRemoteDeletions()
+    XCTAssertEqual(syncer.songListingAllowances.count, 1)
+    XCTAssertEqual(songsRefreshCounter.count, 1)
+  }
+}
