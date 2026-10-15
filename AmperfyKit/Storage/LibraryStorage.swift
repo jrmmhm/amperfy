@@ -1564,6 +1564,12 @@ public class LibraryStorage: PlayableFileCachable {
     candidateCount <= maxRemoteDeletionCandidates && candidateCount <= max(1, localCount / 10)
   }
 
+  /// The server confirms every album candidate on its own before it is marked, and a mark only
+  /// hides the album, so a small library may lose up to three albums at once
+  static func isRemoteAlbumDeletionPlausible(candidateCount: Int, localCount: Int) -> Bool {
+    candidateCount <= maxRemoteDeletionCandidates && candidateCount <= max(3, localCount / 10)
+  }
+
   func checkRemoteAlbumListing(for account: Account, listing: RemoteListing)
     -> RemoteAlbumListingCheck {
     guard !listing.isEmpty else { return RemoteAlbumListingCheck() }
@@ -1574,7 +1580,7 @@ public class LibraryStorage: PlayableFileCachable {
       .filter { !$0.id.isEmpty }
     let availableAlbums = albums.filter { $0.remoteStatus == .available }
     let absentAlbums = availableAlbums.filter { !listing.albumIDs.contains($0.id) }
-    guard Self.isRemoteDeletionPlausible(
+    guard Self.isRemoteAlbumDeletionPlausible(
       candidateCount: absentAlbums.count,
       localCount: availableAlbums.count
     ) else { return RemoteAlbumListingCheck() }
@@ -1635,7 +1641,7 @@ public class LibraryStorage: PlayableFileCachable {
       albums.map { ($0.id, $0) },
       uniquingKeysWith: { album, _ in album }
     ).values.sorted { $0.id < $1.id }
-    guard Self.isRemoteDeletionPlausible(
+    guard Self.isRemoteAlbumDeletionPlausible(
       candidateCount: albumsWithMissingSongs.count,
       localCount: syncedAlbumCount
     ) else { return nil }

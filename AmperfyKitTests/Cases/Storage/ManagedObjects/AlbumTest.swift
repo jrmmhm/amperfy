@@ -235,11 +235,11 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertEqual(check.absentAlbums.map { $0.id }, ["album-4"])
   }
 
-  func testSmallLibrary_TwoAbsentAlbumsAreNotTrusted() {
+  func testSmallLibrary_FourAbsentAlbumsAreNotTrusted() {
     let albums = createAlbums(count: 5)
     let check = library.checkRemoteAlbumListing(
       for: account,
-      listing: listing(of: Array(albums.prefix(3)))
+      listing: listing(of: Array(albums.prefix(1)))
     )
     XCTAssertFalse(check.isPlausible)
     XCTAssertTrue(check.absentAlbums.isEmpty)
@@ -422,7 +422,10 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     let albums = createSyncedAlbumsWithSongs(count: 5)
     XCTAssertNil(library.getAlbumsWithSongsMissing(
       for: account,
-      fromListing: songListing(of: albums, without: ["album-0-song-0", "album-1-song-0"])
+      fromListing: songListing(
+        of: albums,
+        without: ["album-0-song-0", "album-1-song-0", "album-2-song-0", "album-3-song-0"]
+      )
     ))
   }
 
