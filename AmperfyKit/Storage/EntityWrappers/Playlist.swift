@@ -261,7 +261,10 @@ public class Playlist: Identifyable {
 
   public func createAndAppendPlaylistItem(for playable: AbstractPlayable) {
     let playlistItem = library.createPlaylistItem(playable: playable)
-    let lastPlaylistItemOrder = managedObject.items.last?.order ?? Int32(managedObject.items.count)
+    // `managedObject.items` bridges a copy of the whole ordered set on every access,
+    // which makes appending in a loop quadratic; read the set itself instead
+    let items = managedObject.mutableOrderedSetValue(forKey: #keyPath(PlaylistMO.items))
+    let lastPlaylistItemOrder = (items.lastObject as? PlaylistItemMO)?.order ?? Int32(items.count)
     playlistItem.managedObject.order = lastPlaylistItemOrder + PlaylistItemMO.orderDistance
     managedObject.addToItems(playlistItem.managedObject)
   }
