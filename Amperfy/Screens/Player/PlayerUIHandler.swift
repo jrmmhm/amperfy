@@ -38,7 +38,9 @@ class PlayerUIHandler: NSObject {
   public static let playButtonImagePointSize: CGFloat = 25
   public static let bigButtonImagePointSize: CGFloat = 17
   public static let playAndNextiOSButtonImagePointSize: CGFloat = 15
-  public static let shuffleRepeatButtonImagePointSize: CGFloat = 20
+  public static let shuffleRepeatButtonImagePointSize: CGFloat = 15
+  // insets the visible bezel of 32 pt within the 44 pt touch target
+  public static let shuffleRepeatButtonBezelInset: CGFloat = 6
 
   private var player: PlayerFacade
   private var style: PlayerUIStyle
@@ -227,12 +229,7 @@ class PlayerUIHandler: NSObject {
       repeatButton.tintColor = isSelected ? .tintColor : .secondaryLabel
       repeatButton.backgroundColor = isSelected ? .tintColor.withAlphaComponent(0.2) : .clear
     case .popupPlayer:
-      var config = UIButton.Configuration.player(isSelected: isSelected)
-      config.image = image?
-        .withConfiguration(
-          UIImage.SymbolConfiguration(pointSize: Self.shuffleRepeatButtonImagePointSize)
-        )
-      repeatButton.configuration = config
+      repeatButton.configuration = shuffleRepeatConfiguration(image: image, isSelected: isSelected)
       repeatButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     // a press does nothing in podcast mode
@@ -248,16 +245,38 @@ class PlayerUIHandler: NSObject {
       shuffleButton.tintColor = player.isShuffle ? .tintColor : .secondaryLabel
       shuffleButton.backgroundColor = player.isShuffle ? .tintColor.withAlphaComponent(0.2) : .clear
     case .popupPlayer:
-      var config = UIButton.Configuration.player(isSelected: player.isShuffle)
-      config.image = .shuffle
-        .withConfiguration(
-          UIImage.SymbolConfiguration(pointSize: Self.shuffleRepeatButtonImagePointSize)
-        )
-      shuffleButton.configuration = config
+      shuffleButton.configuration = shuffleRepeatConfiguration(
+        image: .shuffle,
+        isSelected: player.isShuffle
+      )
       shuffleButton.isHidden = isShuffleRepeatHiddenInPopupPlayer
     }
     shuffleButton.isEnabled = appDelegate.storage.settings.user.isPlayerShuffleButtonEnabled
     shuffleButton.isSelected = player.isShuffle
+  }
+
+  /// The popup player's shuffle and repeat look: a bezel smaller than the touch target and the
+  /// same symbol size in both states, so that a state change does not resize the symbol.
+  private func shuffleRepeatConfiguration(
+    image: UIImage?,
+    isSelected: Bool
+  )
+    -> UIButton.Configuration {
+    var config = UIButton.Configuration.player(isSelected: isSelected)
+    config.image = image
+    config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+      pointSize: Self.shuffleRepeatButtonImagePointSize,
+      weight: .regular,
+      scale: .medium
+    )
+    let inset = Self.shuffleRepeatButtonBezelInset
+    config.background.backgroundInsets = NSDirectionalEdgeInsets(
+      top: inset,
+      leading: inset,
+      bottom: inset,
+      trailing: inset
+    )
+    return config
   }
 
   /// Shuffle and repeat do not apply to podcasts. On macOS the main window's toolbar player
