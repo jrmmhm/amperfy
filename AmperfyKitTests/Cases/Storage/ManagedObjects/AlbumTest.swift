@@ -245,6 +245,26 @@ class RemoteAlbumListingCheckTest: XCTestCase {
     XCTAssertTrue(check.absentAlbums.isEmpty)
   }
 
+  func testSeventeenAlbums_ThreeAbsentAreTrusted() {
+    let albums = createAlbums(count: 17)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(14)))
+    )
+    XCTAssertTrue(check.isPlausible)
+    XCTAssertEqual(Set(check.absentAlbums.map { $0.id }), ["album-14", "album-15", "album-16"])
+  }
+
+  func testSeventeenAlbums_FourAbsentAreNotTrusted() {
+    let albums = createAlbums(count: 17)
+    let check = library.checkRemoteAlbumListing(
+      for: account,
+      listing: listing(of: Array(albums.prefix(13)))
+    )
+    XCTAssertFalse(check.isPlausible)
+    XCTAssertTrue(check.absentAlbums.isEmpty)
+  }
+
   func testTenthOfLibraryAbsent_IsTrusted() {
     let albums = createAlbums(count: 30)
     let check = library.checkRemoteAlbumListing(
@@ -427,6 +447,42 @@ class RemoteAlbumListingCheckTest: XCTestCase {
         without: ["album-0-song-0", "album-1-song-0", "album-2-song-0", "album-3-song-0"]
       )
     ))
+  }
+
+  func testSongsMissingFromThreeOfSeventeenAlbums_AreTrusted() {
+    let albums = createSyncedAlbumsWithSongs(count: 17)
+    let albumsWithMissingSongs = library.getAlbumsWithSongsMissing(
+      for: account,
+      fromListing: songListing(
+        of: albums,
+        without: ["album-0-song-0", "album-1-song-1", "album-2-song-0"]
+      )
+    )
+    XCTAssertEqual(albumsWithMissingSongs?.map { $0.id }, ["album-0", "album-1", "album-2"])
+  }
+
+  func testRemoteAlbumDeletionPlausibility() {
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 2, localCount: 17))
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 3, localCount: 17))
+    XCTAssertFalse(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 4, localCount: 17))
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 3, localCount: 3))
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 4, localCount: 40))
+    XCTAssertFalse(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 5, localCount: 40))
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(
+      candidateCount: 20,
+      localCount: 1000
+    ))
+    XCTAssertFalse(LibraryStorage.isRemoteAlbumDeletionPlausible(
+      candidateCount: 21,
+      localCount: 300
+    ))
+    XCTAssertFalse(LibraryStorage.isRemoteAlbumDeletionPlausible(
+      candidateCount: 21,
+      localCount: 1000
+    ))
+    // the guard for deleting downloads keeps its own floor
+    XCTAssertTrue(LibraryStorage.isRemoteAlbumDeletionPlausible(candidateCount: 3, localCount: 23))
+    XCTAssertFalse(LibraryStorage.isRemoteDeletionPlausible(candidateCount: 3, localCount: 23))
   }
 
   func testRemoteDeletionPlausibility() {
