@@ -781,8 +781,10 @@ final class AmpacheXmlServerApi: URLCleanser, Sendable {
     switch settings.user.cacheTranscodingFormatPreference {
     case .mp3:
       urlComp.addQueryItem(name: "format", value: "mp3")
-    default:
+    case .raw:
       urlComp.addQueryItem(name: "format", value: "raw")
+    case .serverConfig:
+      break // do nothing
     }
     return try createUrl(from: urlComp)
   }
