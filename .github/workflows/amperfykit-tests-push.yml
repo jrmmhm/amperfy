@@ -1,0 +1,55 @@
+name: AmperfyKitTests
+
+# Manual test run for the Amperfy contribution work: builds Amperfy and runs the
+# AmperfyKitTests XCTest target on a free GitHub-hosted macOS runner. Lives only
+# on the fork's default branch (master); dispatched against an already-published
+# contribution ref. Replaces the Codemagic AmperfyKitTests job.
+on:
+  push:
+    branches:
+      - "ci/gha-**"
+
+permissions:
+  contents: read
+
+jobs:
+  amperfykit-tests:
+    name: AmperfyKitTests
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Check out the chosen ref
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version && xcrun simctl list runtimes
+
+      - name: Run AmperfyKitTests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          version = lambda r: [int(n) for n in r.split("iOS-")[1].split("-")]
+          ios = sorted((r for r in devices if "SimRuntime.iOS-" in r), key=version)
+          phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
+          print(phones[0]["udid"])')
+          echo "Simulator: $DEVICE_ID"
+          xcodebuild test \
+            -project Amperfy.xcodeproj \
+            -scheme Amperfy \
+            -destination "id=$DEVICE_ID" \
+            -only-testing:AmperfyKitTests \
+            -resultBundlePath build/AmperfyKitTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild-test.log
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmperfyKitTests-${{ github.sha }}
+          path: |
+            build/xcodebuild-test.log
+            build/AmperfyKitTests.xcresult
