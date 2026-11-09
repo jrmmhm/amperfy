@@ -153,26 +153,6 @@ final class AmpacheXmlServerApi: URLCleanser, Sendable {
   ) throws
     -> URL {
     guard var apiUrl = URL(string: serverUrl) else { throw BackendError.invalidUrl }
-
-    if let artworkUrl,
-       extractArtworkInfoFromURL(urlString: artworkUrl) == artworkRemoteInfo,
-       let storedUrl = URL(string: artworkUrl),
-       let storedUrlComp = URLComponents(url: storedUrl, resolvingAgainstBaseURL: false),
-       !storedUrl.lastPathComponent.isEmpty, storedUrl.lastPathComponent != "/" {
-      var storedApiUrl = apiUrl
-      storedApiUrl.appendPathComponent(storedUrl.lastPathComponent)
-      if var urlComp = URLComponents(url: storedApiUrl, resolvingAgainstBaseURL: false) {
-        urlComp.addQueryItem(name: "auth", value: authToken)
-        let storedQueryItems = storedUrlComp.percentEncodedQueryItems?
-          .filter { !$0.name.isContainedIn(sessionQueryItemNames) } ?? []
-        urlComp.percentEncodedQueryItems = (urlComp.percentEncodedQueryItems ?? []) +
-          storedQueryItems
-        if let url = urlComp.url {
-          return url
-        }
-      }
-    }
-
     apiUrl.appendPathComponent("image.php")
     guard var urlComp = URLComponents(url: apiUrl, resolvingAgainstBaseURL: false)
     else { throw BackendError.invalidUrl }
@@ -298,8 +278,6 @@ final class AmpacheXmlServerApi: URLCleanser, Sendable {
         outputItems.append(URLQueryItem(name: queryItem.name, value: "AUTH"))
       } else if queryItem.name == "user" {
         outputItems.append(URLQueryItem(name: queryItem.name, value: "USER"))
-      } else if queryItem.name == "token" {
-        outputItems.append(URLQueryItem(name: queryItem.name, value: "TOKEN"))
       } else {
         outputItems.append(queryItem)
       }
